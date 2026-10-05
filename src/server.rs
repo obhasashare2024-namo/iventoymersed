@@ -190,7 +190,19 @@ async fn serve_static(path: &str, is_head: bool, range: Option<&header::HeaderVa
     }
 }
 
-async fn render_ipxe_menu(storage: &StorageManager, client_mac: Option<&str>) -> Response<Body> {
+async fn render_top_level_ipxe_menu(storage: &StorageManager, client_mac: Option<&str>) -> Response<Body> {
+    storage.scan_and_export().await;
+    let script = storage.build_top_level_ipxe_menu(client_mac).await;
+
+    Response::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, "text/plain; charset=utf-8")
+        .header(header::CONTENT_LENGTH, script.len())
+        .body(Body::from(script))
+        .unwrap()
+}
+
+async fn render_standalone_ipxe_menu(storage: &StorageManager, client_mac: Option<&str>) -> Response<Body> {
     storage.scan_and_export().await;
     let script = storage.build_standalone_ipxe_menu(client_mac).await;
 
@@ -222,7 +234,7 @@ async fn root_handler(
 
     if is_ipxe {
         if method == Method::GET {
-            return render_ipxe_menu(&state.storage, mac).await;
+            return render_top_level_ipxe_menu(&state.storage, mac).await;
         }
         if method == Method::HEAD {
             return Response::builder()
@@ -253,19 +265,19 @@ async fn root_handler(
         .unwrap()
 }
 
-// Handler for /boot.ipxe and /ipxe/menu
-async fn ipxe_handler(
+// Top-level dual-engine selector handler
+async fn top_level_ipxe_handler(
     State(state): State<Arc<AppState>>,
     ConnectInfo(client): ConnectInfo<SocketAddr>,
     Query(params): Query<HashMap<String, String>>,
     req: Request,
 ) -> Response<Body> {
     let method = req.method().clone();
-    req_log(&client, &format!("{} /boot.ipxe", method));
+    req_log(&client, &format!("{} /boot.ipxe (Top-Level Dual Engine)", method));
 
     let mac = params.get("mac").map(|s| s.as_str());
     if method == Method::GET {
-        return render_ipxe_menu(&state.storage, mac).await;
+        return render_top_level_ipxe_menu(&state.storage, mac).await;
     }
     if method == Method::HEAD {
         return Response::builder()
@@ -279,6 +291,97 @@ async fn ipxe_handler(
         .status(StatusCode::METHOD_NOT_ALLOWED)
         .body(Body::empty())
         .unwrap()
+}
+
+// Engine A subsystem handler
+async fn track_a_ipxe_handler(
+    State(state): State<Arc<AppState>>,
+    ConnectInfo(client): ConnectInfo<SocketAddr>,
+    Query(params): Query<HashMap<String, String>>,
+    req: Request,
+) -> Response<Body> {
+    let method = req.method().clone();
+    req_log(&client, &format!("{} /ipxe/menu-a (Engine A Standalone)", method));
+
+    let mac = params.get("mac").map(|s| s.as_str());
+    if method == Method::GET {
+        return render_standalone_ipxe_menu(&state.storage, mac).await;
+    }
+    if method == Method::HEAD {
+        return Response::builder()
+            .status(StatusCode::OK)
+            .header(header::CONTENT_TYPE, "text/plain")
+            .body(Body::empty())
+            .unwrap();
+    }
+
+    Response::builder()
+        .status(StatusCode::METHOD_NOT_ALLOWED)
+        .body(Body::empty())
+        .unwrap()
+}
+
+// Engine B subsystem handler (dynamic GRUB cfg)
+async fn track_b_grub_handler(
+    State(state): State<Arc<AppState>>,
+    ConnectInfo(client): ConnectInfo<SocketAddr>,
+    req: Request,
+) -> Response<Body> {
+    let method = req.method().clone();
+    req_log(&client, &format!("{} /grub/grub.cfg (Engine B NetLoop)", method));
+
+    state.storage.scan_and_export().await;
+    let cfg_text = state.storage.build_netloop_grub_cfg().await;
+
+    Response::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, "text/plain; charset=utf-8")
+        .header(header::CONTENT_LENGTH, cfg_text.len())
+        .body(Body::from(cfg_text))
+        .unwrap()
+}
+
+// Handlers for GRUB binaries
+async fn grub_core_handler() -> Response<Body> {
+    let candidates = [
+        "assets/grub/core.0",
+        "/home/namobuddha/lammacpp/iventoymersed/assets/grub/core.0",
+        "/mnt/2tbnvS/tmp/tftp/boot/grub/i386-pc/core.0",
+    ];
+    for p in &candidates {
+        if std::path::Path::new(p).exists() {
+            if let Ok(bytes) = tokio::fs::read(p).await {
+                return Response::builder()
+                    .status(StatusCode::OK)
+                    .header(header::CONTENT_TYPE, "application/octet-stream")
+                    .header(header::CONTENT_LENGTH, bytes.len())
+                    .body(Body::from(bytes))
+                    .unwrap();
+            }
+        }
+    }
+    Response::builder().status(StatusCode::NOT_FOUND).body(Body::from("core.0 not found")).unwrap()
+}
+
+async fn grub_efi_handler() -> Response<Body> {
+    let candidates = [
+        "assets/grub/grubnet.efi",
+        "/home/namobuddha/lammacpp/iventoymersed/assets/grub/grubnet.efi",
+        "/mnt/2tbnvS/tmp/grub_build/grubnet.efi",
+    ];
+    for p in &candidates {
+        if std::path::Path::new(p).exists() {
+            if let Ok(bytes) = tokio::fs::read(p).await {
+                return Response::builder()
+                    .status(StatusCode::OK)
+                    .header(header::CONTENT_TYPE, "application/octet-stream")
+                    .header(header::CONTENT_LENGTH, bytes.len())
+                    .body(Body::from(bytes))
+                    .unwrap();
+            }
+        }
+    }
+    Response::builder().status(StatusCode::NOT_FOUND).body(Body::from("grubnet.efi not found")).unwrap()
 }
 
 // Handlers for static boot files
@@ -429,9 +532,15 @@ async fn api_remove_mac_binding(
 pub fn make_app(state: Arc<AppState>) -> Router {
     Router::new()
         .route("/", any(root_handler))
-        .route("/boot.ipxe", any(ipxe_handler))
-        .route("/ipxe/menu", any(ipxe_handler))
-        .route("/ipxe", any(ipxe_handler))
+        .route("/boot.ipxe", any(top_level_ipxe_handler))
+        .route("/ipxe/menu", any(top_level_ipxe_handler))
+        .route("/ipxe", any(top_level_ipxe_handler))
+        .route("/ipxe/menu-a", any(track_a_ipxe_handler))
+        .route("/ipxe/track-a", any(track_a_ipxe_handler))
+        .route("/grub/core.0", any(grub_core_handler))
+        .route("/grub/grubnet.efi", any(grub_efi_handler))
+        .route("/boot/grub/grub.cfg", any(track_b_grub_handler))
+        .route("/grub/grub.cfg", any(track_b_grub_handler))
         .route("/vtoy/vmlinuz", any(vmlinuz_handler))
         .route("/vtoy/initramfs.img", any(initramfs_handler))
         .route("/iso/{*file}", any(iso_handler))

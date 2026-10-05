@@ -1,8 +1,8 @@
 [package]
-name = "iventoy-ipxe"
-version = "2.0.0"
+name = "iventoymersed"
+version = "3.0.0"
 edition = "2021"
-description = "100% Standalone Pure Rust All-in-One iVentoy / iPXE Network Boot Server"
+description = "iventoymersed: 100% Pure Rust Dual-Engine Network Boot Server"
 
 [dependencies]
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "process", "signal", "time", "sync", "fs", "io-util"] }

@@ -532,4 +532,76 @@ impl StorageManager {
 
         script
     }
+
+    /// Builds the top-level dual-engine selector menu with configurable timeout
+    pub async fn build_top_level_ipxe_menu(&self, _client_mac: Option<&str>) -> String {
+        let mut script = String::new();
+        script.push_str("#!ipxe\n\n");
+        script.push_str("# Styling & Palette (Ventoy Cyber Theme)\n");
+        script.push_str("cpair --foreground 7 --background 0 0 ||\n");
+        script.push_str("cpair --foreground 6 --background 0 1 ||\n");
+        script.push_str("cpair --foreground 3 --background 0 2 ||\n\n");
+
+        script.push_str("set menu-timeout 5000\n");
+        script.push_str("isset ${menu-default} || set menu-default engine_track_a\n\n");
+
+        script.push_str(":start\n");
+        script.push_str("menu iventoymersed Dual-Engine Selector (Auto-booting in 5s)\n\n");
+        script.push_str("item --gap -- ================= Select Boot Engine =================\n");
+        script.push_str("item engine_track_a [Engine A] iVentoy-iPXE NBD Hook Mode (Fast Client, Low RAM)\n");
+        script.push_str("item engine_track_b [Engine B] Pure NetLoop HTTP 206 Mode (Zero Server State)\n\n");
+        script.push_str("item --gap -- ================= Operations & Tools =================\n");
+        script.push_str("item shell  Drop into iPXE Shell\n");
+        script.push_str("item reboot Reboot Computer\n");
+        script.push_str("item exit   Exit to Local BIOS/UEFI\n\n");
+
+        script.push_str("choose --timeout ${menu-timeout} --default ${menu-default} selected || goto engine_track_a\n");
+        script.push_str("goto ${selected}\n\n");
+
+        script.push_str(":engine_track_a\n");
+        script.push_str("echo Loading Engine A (iVentoy-iPXE Subsystem)...\n");
+        script.push_str("chain http://${next-server}:26001/ipxe/menu-a || goto boot_failed\n\n");
+
+        script.push_str(":engine_track_b\n");
+        script.push_str("echo Loading Engine B (Pure NetLoop GRUB Subsystem)...\n");
+        script.push_str("chain http://${next-server}:26001/grub/core.0 || goto boot_failed\n\n");
+
+        script.push_str(":shell\nshell\n\n:reboot\nreboot\n\n:exit\nexit\n\n");
+        script.push_str(":boot_failed\necho Boot failed or cancelled! Dropping to shell in 5 seconds...\nsleep 5\ngoto shell\n\n");
+        script
+    }
+
+    /// Builds dynamic GRUB configuration for Engine B (Pure NetLoop HTTP 206)
+    pub async fn build_netloop_grub_cfg(&self) -> String {
+        let snapshot = self.health_targets().await;
+        let mut cfg = String::new();
+        cfg.push_str("set timeout=5\nset default=0\n\n");
+        cfg.push_str("set menu_color_normal=white/black\nset menu_color_highlight=black/cyan\n\n");
+        cfg.push_str("insmod all_video\nset gfxmode=1280x800,1024x768,auto\nset gfxpayload=keep\n\n");
+
+        for item in snapshot {
+            if item.file.ends_with(".iso") {
+                cfg.push_str(&format!(
+                    "menuentry \">> [NetLoop ISO] {} <<\" {{\n    insmod http\n    insmod loopback\n    insmod iso9660\n    loopback loop (http,${{net_default_server}}:26001)/iso/{}\n    boot\n}}\n\n",
+                    item.file, item.file
+                ));
+            } else if item.file.contains("COS") {
+                cfg.push_str(&format!(
+                    "menuentry \">> [Pure NetLoop] CachyOS 142GB Ext4 ({}) <<\" {{\n    insmod http\n    insmod loopback\n    insmod part_gpt\n    insmod ext2\n    insmod linux\n    echo \"[1/4] Establishing HTTP 206 Loopback to {}...\"\n    loopback loop (http,${{net_default_server}}:26001)/iso/{}\n    echo \"[2/4] Parsing internal GPT table and extracting CachyOS kernel...\"\n    linux (loop,gpt2)/boot/vmlinuz-linux-cachyos console=ttyS0 console=tty0 root=UUID=f80dc16b-e328-40f4-8db8-f30faf11a445 ro verbose\n    echo \"[3/4] Extracting CachyOS native initramfs from loopback block device...\"\n    initrd (loop,gpt2)/boot/initramfs-linux-cachyos.img\n    echo \"[4/4] Executing kernel and launching CachyOS...\"\n    boot\n}}\n\n",
+                    item.file, item.file, item.file
+                ));
+            } else if item.file.contains("anitix") {
+                cfg.push_str(&format!(
+                    "menuentry \">> [Pure NetLoop] antiX Linux 8GB Btrfs ({}) <<\" {{\n    insmod http\n    insmod loopback\n    insmod part_gpt\n    insmod btrfs\n    insmod linux\n    echo \"[1/4] Establishing HTTP 206 Loopback to {}...\"\n    loopback loop (http,${{net_default_server}}:26001)/iso/{}\n    echo \"[2/4] Parsing GPT and extracting antiX kernel...\"\n    linux (loop,gpt3)/boot/vmlinuz-6.6.119-antix.1-amd64-smp console=ttyS0 console=tty0 root=UUID=d1b65f8f-9d38-4e06-a902-8ff9240921c5 ro verbose\n    echo \"[3/4] Extracting antiX native initramfs...\"\n    initrd (loop,gpt3)/boot/initrd.img-6.6.119-antix.1-amd64-smp\n    echo \"[4/4] Executing kernel...\"\n    boot\n}}\n\n",
+                    item.file, item.file, item.file
+                ));
+            } else {
+                cfg.push_str(&format!(
+                    "menuentry \">> [NetLoop VDisk] {} (Port {}) <<\" {{\n    insmod http\n    insmod loopback\n    insmod part_gpt\n    loopback loop (http,${{net_default_server}}:26001)/iso/{}\n    boot\n}}\n\n",
+                    item.file, item.nbd_port, item.file
+                ));
+            }
+        }
+        cfg
+    }
 }

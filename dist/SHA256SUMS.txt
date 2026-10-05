@@ -1,2 +1,2 @@
-749ca4fe0dbc947cdaf220b004e24305416b1deeecbe6957218f6b0168a3d193  iventoy-ipxe-v2.0.0-linux-x86_64.tar.gz
-586c31a3f52eb7825147728383d5fd5e4320103451cb8f51a2714a9f40272e1f  iventoy-ipxe
+c5da87e133fa09060c143356af56dcfa7b59b74f012f134cab8bb444e47a002f  dist/iventoy-ipxe
+128ddbbb4a40918a13205ef3578602f16e5e1310ce81bdae785ad6eb9bb90adf  dist/iventoy-ipxe-v2.0.0-linux-x86_64.tar.gz

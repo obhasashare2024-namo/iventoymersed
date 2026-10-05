@@ -1,0 +1,338 @@
+[config] Loaded json config from: /run/media/namobuddha/2tbnvV/iventoy.json
+[storage] Exporting NBD on port 10810: Backing=/run/media/namobuddha/2tbnvV/0000ub24upBEzfs.vhd.vtoy (format=vpc)
+[storage] Spawned qemu-nbd PID=Some(477) on port 10810
+[storage] Exporting NBD on port 10811: Backing=/run/media/namobuddha/2tbnvV/0001COSext4.vhd.vtoy (format=vpc)
+[storage] Spawned qemu-nbd PID=Some(479) on port 10811
+[storage] Exporting NBD on port 10812: Backing=/run/media/namobuddha/2tbnvV/0001artixbtrfs3070.img.vtoy (format=raw)
+[storage] Spawned qemu-nbd PID=Some(480) on port 10812
+[storage] Exporting NBD on port 10813: Backing=/run/media/namobuddha/2tbnvV/001ubext4VR.vhd.vtoy (format=vpc)
+[storage] Spawned qemu-nbd PID=Some(481) on port 10813
+[storage] Exporting iSCSI: TID=104 IQN=iqn.2026.lan:vtoy:25h2_vhdx Backing=/run/media/namobuddha/2tbnvV/25h2.vhdx
+[storage] Exporting NBD on port 10814: Backing=/run/media/namobuddha/2tbnvV/25h2.vhdx (format=vhdx)
+[storage] Spawned qemu-nbd PID=Some(486) on port 10814
+[storage] Exporting iSCSI: TID=105 IQN=iqn.2026.lan:vtoy:Ventoyisobank_vhd Backing=/run/media/namobuddha/2tbnvV/Ventoyisobank.vhd
+[storage] Exporting NBD on port 10815: Backing=/run/media/namobuddha/2tbnvV/Ventoyisobank.vhd (format=vpc)
+[storage] Spawned qemu-nbd PID=Some(490) on port 10815
+[storage] Exporting NBD on port 10816: Backing=/run/media/namobuddha/2tbnvV/anitix8g.vhd.vtoy (format=vpc)
+[storage] Spawned qemu-nbd PID=Some(491) on port 10816
+[storage] Exporting NBD on port 10817: Backing=/run/media/namobuddha/2tbnvV/artixEFIext4utility.img.vtoy (format=raw)
+[storage] Spawned qemu-nbd PID=Some(493) on port 10817
+[storage] Exporting iSCSI: TID=108 IQN=iqn.2026.lan:vtoy:cwin10LTSCx15nuc_vhd Backing=/run/media/namobuddha/2tbnvV/cwin10LTSCx15nuc.vhd
+[storage] Exporting NBD on port 10818: Backing=/run/media/namobuddha/2tbnvV/cwin10LTSCx15nuc.vhd (format=vpc)
+[storage] Spawned qemu-nbd PID=Some(502) on port 10818
+[storage] Exporting NBD on port 10819: Backing=/run/media/namobuddha/2tbnvV/initramfs.img (format=raw)
+[storage] Spawned qemu-nbd PID=Some(504) on port 10819
+[*] iventoy-ipxe v2.0.0 (Pure Rust Standalone) running on 0.0.0.0:26001 mode=nbd pid=456
+qemu-nbd: qemu-nbd: qemu-nbd:Failed to find an available port: Address already in use qemu-nbd:
+ Failed to find an available port: Address already in useFailed to find an available port: Address already in useFailed to find an available port: Address already in use
+
+
+qemu-nbd: Failed to find an available port: Address already in use
+qemu-nbd: Failed to find an available port: Address already in use
+qemu-nbd: Failed to find an available port: Address already in use
+qemu-nbd: Failed to find an available port: Address already in use
+qemu-nbd: Failed to find an available port: Address already in use
+qemu-nbd: Failed to find an available port: Address already in use
+[2026-10-05 04:40:56] 127.0.0.1 - GET /boot.ipxe
+[storage] qemu-nbd died, respawning on port 10810
+[storage] Exporting NBD on port 10810: Backing=/run/media/namobuddha/2tbnvV/0000ub24upBEzfs.vhd.vtoy (format=vpc)
+[storage] Spawned qemu-nbd PID=Some(571) on port 10810
+[storage] qemu-nbd died, respawning on port 10811
+[storage] Exporting NBD on port 10811: Backing=/run/media/namobuddha/2tbnvV/0001COSext4.vhd.vtoy (format=vpc)
+[storage] Spawned qemu-nbd PID=Some(572) on port 10811
+[storage] qemu-nbd died, respawning on port 10812
+[storage] Exporting NBD on port 10812: Backing=/run/media/namobuddha/2tbnvV/0001artixbtrfs3070.img.vtoy (format=raw)
+[storage] Spawned qemu-nbd PID=Some(573) on port 10812
+[storage] qemu-nbd died, respawning on port 10813
+[storage] Exporting NBD on port 10813: Backing=/run/media/namobuddha/2tbnvV/001ubext4VR.vhd.vtoy (format=vpc)
+[storage] Spawned qemu-nbd PID=Some(574) on port 10813
+[storage] qemu-nbd died, respawning on port 10814
+[storage] Exporting NBD on port 10814: Backing=/run/media/namobuddha/2tbnvV/25h2.vhdx (format=vhdx)
+[storage] Spawned qemu-nbd PID=Some(575) on port 10814
+[storage] qemu-nbd died, respawning on port 10815
+[storage] Exporting NBD on port 10815: Backing=/run/media/namobuddha/2tbnvV/Ventoyisobank.vhd (format=vpc)
+[storage] Spawned qemu-nbd PID=Some(576) on port 10815
+[storage] qemu-nbd died, respawning on port 10816
+[storage] Exporting NBD on port 10816: Backing=/run/media/namobuddha/2tbnvV/anitix8g.vhd.vtoy (format=vpc)
+[storage] Spawned qemu-nbd PID=Some(577) on port 10816
+[storage] qemu-nbd died, respawning on port 10817
+[storage] Exporting NBD on port 10817: Backing=/run/media/namobuddha/2tbnvV/artixEFIext4utility.img.vtoy (format=raw)
+[storage] Spawned qemu-nbd PID=Some(578) on port 10817
+[storage] qemu-nbd died, respawning on port 10818
+[storage] Exporting NBD on port 10818: Backing=/run/media/namobuddha/2tbnvV/cwin10LTSCx15nuc.vhd (format=vpc)
+[storage] Spawned qemu-nbd PID=Some(579) on port 10818
+[storage] qemu-nbd died, respawning on port 10819
+[storage] Exporting NBD on port 10819: Backing=/run/media/namobuddha/2tbnvV/initramfs.img (format=raw)
+[storage] Spawned qemu-nbd PID=Some(580) on port 10819
+qemu-nbd:qemu-nbd: qemu-nbd: Failed to find an available port: Address already in use Failed to find an available port: Address already in use
+Failed to find an available port: Address already in use
+
+qemu-nbd: Failed to find an available port: Address already in use
+qemu-nbd: Failed to find an available port: Address already in use
+qemu-nbd: Failed to find an available port: Address already in use
+qemu-nbd: Failed to find an available port: Address already in use
+qemu-nbd: Failed to find an available port: Address already in use
+qemu-nbd: Failed to find an available port: Address already in use
+qemu-nbd: Failed to find an available port: Address already in use
+[2026-10-05 04:41:41] 127.0.0.1 - GET /boot.ipxe
+[storage] qemu-nbd died, respawning on port 10810
+[storage] Exporting NBD on port 10810: Backing=/run/media/namobuddha/2tbnvV/0000ub24upBEzfs.vhd.vtoy (format=vpc)
+[storage] Spawned qemu-nbd PID=Some(7388) on port 10810
+[storage] qemu-nbd died, respawning on port 10811
+[storage] Exporting NBD on port 10811: Backing=/run/media/namobuddha/2tbnvV/0001COSext4.vhd.vtoy (format=vpc)
+[storage] Spawned qemu-nbd PID=Some(7389) on port 10811
+[storage] qemu-nbd died, respawning on port 10812
+[storage] Exporting NBD on port 10812: Backing=/run/media/namobuddha/2tbnvV/0001artixbtrfs3070.img.vtoy (format=raw)
+[storage] Spawned qemu-nbd PID=Some(7390) on port 10812
+[storage] qemu-nbd died, respawning on port 10813
+[storage] Exporting NBD on port 10813: Backing=/run/media/namobuddha/2tbnvV/001ubext4VR.vhd.vtoy (format=vpc)
+[storage] Spawned qemu-nbd PID=Some(7391) on port 10813
+[storage] qemu-nbd died, respawning on port 10814
+[storage] Exporting NBD on port 10814: Backing=/run/media/namobuddha/2tbnvV/25h2.vhdx (format=vhdx)
+[storage] Spawned qemu-nbd PID=Some(7392) on port 10814
+[storage] qemu-nbd died, respawning on port 10815
+[storage] Exporting NBD on port 10815: Backing=/run/media/namobuddha/2tbnvV/Ventoyisobank.vhd (format=vpc)
+[storage] Spawned qemu-nbd PID=Some(7393) on port 10815
+[storage] qemu-nbd died, respawning on port 10816
+[storage] Exporting NBD on port 10816: Backing=/run/media/namobuddha/2tbnvV/anitix8g.vhd.vtoy (format=vpc)
+[storage] Spawned qemu-nbd PID=Some(7394) on port 10816
+[storage] qemu-nbd died, respawning on port 10817
+[storage] Exporting NBD on port 10817: Backing=/run/media/namobuddha/2tbnvV/artixEFIext4utility.img.vtoy (format=raw)
+[storage] Spawned qemu-nbd PID=Some(7395) on port 10817
+[storage] qemu-nbd died, respawning on port 10818
+[storage] Exporting NBD on port 10818: Backing=/run/media/namobuddha/2tbnvV/cwin10LTSCx15nuc.vhd (format=vpc)
+[storage] Spawned qemu-nbd PID=Some(7396) on port 10818
+[storage] qemu-nbd died, respawning on port 10819
+[storage] Exporting NBD on port 10819: Backing=/run/media/namobuddha/2tbnvV/initramfs.img (format=raw)
+[storage] Spawned qemu-nbd PID=Some(7397) on port 10819
+qemu-nbd: Failed to find an available port: Address already in use
+qemu-nbd: Failed to find an available port: Address already in use
+qemu-nbd: Failed to find an available port: Address already in use
+qemu-nbd: Failed to find an available port: Address already in use
+qemu-nbd:qemu-nbd:qemu-nbd: qemu-nbd:qemu-nbd:  Failed to find an available port: Address already in use  Failed to find an available port: Address already in useFailed to find an available port: Address already in use
+Failed to find an available port: Address already in useFailed to find an available port: Address already in useqemu-nbd:
+
+
+
+ Failed to find an available port: Address already in use
+[2026-10-05 04:41:56] 127.0.0.1 - GET /vtoy/vmlinuz
+[2026-10-05 04:41:56] 127.0.0.1 - GET /vtoy/initramfs.img
+[2026-10-05 04:46:59] 127.0.0.1 - GET /boot.ipxe
+[storage] qemu-nbd died, respawning on port 10810
+[storage] Exporting NBD on port 10810: Backing=/run/media/namobuddha/2tbnvV/0000ub24upBEzfs.vhd.vtoy (format=vpc)
+[storage] Spawned qemu-nbd PID=Some(14357) on port 10810
+[storage] qemu-nbd died, respawning on port 10811
+[storage] Exporting NBD on port 10811: Backing=/run/media/namobuddha/2tbnvV/0001COSext4.vhd.vtoy (format=vpc)
+[storage] Spawned qemu-nbd PID=Some(14358) on port 10811
+[storage] qemu-nbd died, respawning on port 10812
+[storage] Exporting NBD on port 10812: Backing=/run/media/namobuddha/2tbnvV/0001artixbtrfs3070.img.vtoy (format=raw)
+[storage] Spawned qemu-nbd PID=Some(14359) on port 10812
+[storage] qemu-nbd died, respawning on port 10813
+[storage] Exporting NBD on port 10813: Backing=/run/media/namobuddha/2tbnvV/001ubext4VR.vhd.vtoy (format=vpc)
+[storage] Spawned qemu-nbd PID=Some(14360) on port 10813
+[storage] qemu-nbd died, respawning on port 10814
+[storage] Exporting NBD on port 10814: Backing=/run/media/namobuddha/2tbnvV/25h2.vhdx (format=vhdx)
+[storage] Spawned qemu-nbd PID=Some(14361) on port 10814
+[storage] qemu-nbd died, respawning on port 10815
+[storage] Exporting NBD on port 10815: Backing=/run/media/namobuddha/2tbnvV/Ventoyisobank.vhd (format=vpc)
+[storage] Spawned qemu-nbd PID=Some(14362) on port 10815
+[storage] qemu-nbd died, respawning on port 10816
+[storage] Exporting NBD on port 10816: Backing=/run/media/namobuddha/2tbnvV/anitix8g.vhd.vtoy (format=vpc)
+[storage] Spawned qemu-nbd PID=Some(14363) on port 10816
+[storage] qemu-nbd died, respawning on port 10817
+[storage] Exporting NBD on port 10817: Backing=/run/media/namobuddha/2tbnvV/artixEFIext4utility.img.vtoy (format=raw)
+[storage] Spawned qemu-nbd PID=Some(14364) on port 10817
+[storage] qemu-nbd died, respawning on port 10818
+[storage] Exporting NBD on port 10818: Backing=/run/media/namobuddha/2tbnvV/cwin10LTSCx15nuc.vhd (format=vpc)
+[storage] Spawned qemu-nbd PID=Some(14365) on port 10818
+[storage] qemu-nbd died, respawning on port 10819
+[storage] Exporting NBD on port 10819: Backing=/run/media/namobuddha/2tbnvV/initramfs.img (format=raw)
+[storage] Spawned qemu-nbd PID=Some(14366) on port 10819
+qemu-nbd: Failed to find an available port: Address already in use
+qemu-nbd: Failed to find an available port: Address already in use
+qemu-nbd: Failed to find an available port: Address already in use
+qemu-nbd: Failed to find an available port: Address already in use
+qemu-nbd: Failed to find an available port: Address already in use
+qemu-nbd: Failed to find an available port: Address already in use
+qemu-nbd: Failed to find an available port: Address already in use
+qemu-nbd: qemu-nbd:Failed to find an available port: Address already in use 
+Failed to find an available port: Address already in use
+qemu-nbd: Failed to find an available port: Address already in use
+[2026-10-05 04:47:15] 127.0.0.1 - GET /vtoy/vmlinuz
+[2026-10-05 04:47:15] 127.0.0.1 - GET /vtoy/initramfs.img
+[2026-10-05 04:49:38] 127.0.0.1 - GET /boot.ipxe
+[storage] qemu-nbd died, respawning on port 10810
+[storage] Exporting NBD on port 10810: Backing=/run/media/namobuddha/2tbnvV/0000ub24upBEzfs.vhd.vtoy (format=vpc)
+[storage] Spawned qemu-nbd PID=Some(1942) on port 10810
+[storage] qemu-nbd died, respawning on port 10811
+[storage] Exporting NBD on port 10811: Backing=/run/media/namobuddha/2tbnvV/0001COSext4.vhd.vtoy (format=vpc)
+[storage] Spawned qemu-nbd PID=Some(1943) on port 10811
+[storage] qemu-nbd died, respawning on port 10812
+[storage] Exporting NBD on port 10812: Backing=/run/media/namobuddha/2tbnvV/0001artixbtrfs3070.img.vtoy (format=raw)
+[storage] Spawned qemu-nbd PID=Some(1944) on port 10812
+[storage] qemu-nbd died, respawning on port 10813
+[storage] Exporting NBD on port 10813: Backing=/run/media/namobuddha/2tbnvV/001ubext4VR.vhd.vtoy (format=vpc)
+[storage] Spawned qemu-nbd PID=Some(1945) on port 10813
+[storage] qemu-nbd died, respawning on port 10814
+[storage] Exporting NBD on port 10814: Backing=/run/media/namobuddha/2tbnvV/25h2.vhdx (format=vhdx)
+[storage] Spawned qemu-nbd PID=Some(1949) on port 10814
+[storage] qemu-nbd died, respawning on port 10815
+[storage] Exporting NBD on port 10815: Backing=/run/media/namobuddha/2tbnvV/Ventoyisobank.vhd (format=vpc)
+[storage] Spawned qemu-nbd PID=Some(1952) on port 10815
+[storage] qemu-nbd died, respawning on port 10816
+[storage] Exporting NBD on port 10816: Backing=/run/media/namobuddha/2tbnvV/anitix8g.vhd.vtoy (format=vpc)
+[storage] Spawned qemu-nbd PID=Some(1953) on port 10816
+[storage] qemu-nbd died, respawning on port 10817
+[storage] Exporting NBD on port 10817: Backing=/run/media/namobuddha/2tbnvV/artixEFIext4utility.img.vtoy (format=raw)
+[storage] Spawned qemu-nbd PID=Some(1954) on port 10817
+[storage] qemu-nbd died, respawning on port 10818
+[storage] Exporting NBD on port 10818: Backing=/run/media/namobuddha/2tbnvV/cwin10LTSCx15nuc.vhd (format=vpc)
+[storage] Spawned qemu-nbd PID=Some(1955) on port 10818
+[storage] qemu-nbd died, respawning on port 10819
+[storage] Exporting NBD on port 10819: Backing=/run/media/namobuddha/2tbnvV/initramfs.img (format=raw)
+[storage] Spawned qemu-nbd PID=Some(1957) on port 10819
+qemu-nbd:qemu-nbd:  Failed to find an available port: Address already in useFailed to find an available port: Address already in use
+
+qemu-nbd: qemu-nbd:qemu-nbd:qemu-nbd:Failed to find an available port: Address already in use   
+Failed to find an available port: Address already in useFailed to find an available port: Address already in useFailed to find an available port: Address already in use
+
+
+qemu-nbd: Failed to find an available port: Address already in use
+qemu-nbd: Failed to find an available port: Address already in use
+qemu-nbd: Failed to find an available port: Address already in use
+qemu-nbd: Failed to find an available port: Address already in use
+[2026-10-05 04:49:53] 127.0.0.1 - GET /vtoy/vmlinuz
+[2026-10-05 04:49:53] 127.0.0.1 - GET /vtoy/initramfs.img
+[2026-10-05 04:53:47] 127.0.0.1 - GET /boot.ipxe
+[storage] qemu-nbd died, respawning on port 10810
+[storage] Exporting NBD on port 10810: Backing=/run/media/namobuddha/2tbnvV/0000ub24upBEzfs.vhd.vtoy (format=vpc)
+[storage] Spawned qemu-nbd PID=Some(32149) on port 10810
+[storage] qemu-nbd died, respawning on port 10811
+[storage] Exporting NBD on port 10811: Backing=/run/media/namobuddha/2tbnvV/0001COSext4.vhd.vtoy (format=vpc)
+[storage] Spawned qemu-nbd PID=Some(32150) on port 10811
+[storage] qemu-nbd died, respawning on port 10812
+[storage] Exporting NBD on port 10812: Backing=/run/media/namobuddha/2tbnvV/0001artixbtrfs3070.img.vtoy (format=raw)
+[storage] Spawned qemu-nbd PID=Some(32151) on port 10812
+[storage] qemu-nbd died, respawning on port 10813
+[storage] Exporting NBD on port 10813: Backing=/run/media/namobuddha/2tbnvV/001ubext4VR.vhd.vtoy (format=vpc)
+[storage] Spawned qemu-nbd PID=Some(32152) on port 10813
+[storage] qemu-nbd died, respawning on port 10814
+[storage] Exporting NBD on port 10814: Backing=/run/media/namobuddha/2tbnvV/25h2.vhdx (format=vhdx)
+[storage] Spawned qemu-nbd PID=Some(32153) on port 10814
+[storage] qemu-nbd died, respawning on port 10815
+[storage] Exporting NBD on port 10815: Backing=/run/media/namobuddha/2tbnvV/Ventoyisobank.vhd (format=vpc)
+[storage] Spawned qemu-nbd PID=Some(32154) on port 10815
+[storage] qemu-nbd died, respawning on port 10816
+[storage] Exporting NBD on port 10816: Backing=/run/media/namobuddha/2tbnvV/anitix8g.vhd.vtoy (format=vpc)
+[storage] Spawned qemu-nbd PID=Some(32155) on port 10816
+[storage] qemu-nbd died, respawning on port 10817
+[storage] Exporting NBD on port 10817: Backing=/run/media/namobuddha/2tbnvV/artixEFIext4utility.img.vtoy (format=raw)
+[storage] Spawned qemu-nbd PID=Some(32156) on port 10817
+[storage] qemu-nbd died, respawning on port 10818
+[storage] Exporting NBD on port 10818: Backing=/run/media/namobuddha/2tbnvV/cwin10LTSCx15nuc.vhd (format=vpc)
+[storage] Spawned qemu-nbd PID=Some(32157) on port 10818
+[storage] qemu-nbd died, respawning on port 10819
+[storage] Exporting NBD on port 10819: Backing=/run/media/namobuddha/2tbnvV/initramfs.img (format=raw)
+[storage] Spawned qemu-nbd PID=Some(32158) on port 10819
+qemu-nbd:qemu-nbd:  Failed to find an available port: Address already in useFailed to find an available port: Address already in use
+
+qemu-nbd: Failed to find an available port: Address already in use
+qemu-nbd: Failed to find an available port: Address already in use
+qemu-nbd: Failed to find an available port: Address already in use
+qemu-nbd: Failed to find an available port: Address already in use
+qemu-nbd: Failed to find an available port: Address already in use
+qemu-nbd: Failed to find an available port: Address already in use
+qemu-nbd: Failed to find an available port: Address already in use
+qemu-nbd: Failed to find an available port: Address already in use
+[2026-10-05 04:54:02] 127.0.0.1 - GET /vtoy/vmlinuz
+[2026-10-05 04:54:03] 127.0.0.1 - GET /vtoy/initramfs.img
+[2026-10-05 04:54:35] 127.0.0.1 - GET /boot.ipxe
+[storage] qemu-nbd died, respawning on port 10810
+[storage] Exporting NBD on port 10810: Backing=/run/media/namobuddha/2tbnvV/0000ub24upBEzfs.vhd.vtoy (format=vpc)
+[storage] Spawned qemu-nbd PID=Some(5595) on port 10810
+[storage] qemu-nbd died, respawning on port 10811
+[storage] Exporting NBD on port 10811: Backing=/run/media/namobuddha/2tbnvV/0001COSext4.vhd.vtoy (format=vpc)
+[storage] Spawned qemu-nbd PID=Some(5596) on port 10811
+[storage] qemu-nbd died, respawning on port 10812
+[storage] Exporting NBD on port 10812: Backing=/run/media/namobuddha/2tbnvV/0001artixbtrfs3070.img.vtoy (format=raw)
+[storage] Spawned qemu-nbd PID=Some(5597) on port 10812
+[storage] qemu-nbd died, respawning on port 10813
+[storage] Exporting NBD on port 10813: Backing=/run/media/namobuddha/2tbnvV/001ubext4VR.vhd.vtoy (format=vpc)
+[storage] Spawned qemu-nbd PID=Some(5598) on port 10813
+[storage] qemu-nbd died, respawning on port 10814
+[storage] Exporting NBD on port 10814: Backing=/run/media/namobuddha/2tbnvV/25h2.vhdx (format=vhdx)
+[storage] Spawned qemu-nbd PID=Some(5599) on port 10814
+[storage] qemu-nbd died, respawning on port 10815
+[storage] Exporting NBD on port 10815: Backing=/run/media/namobuddha/2tbnvV/Ventoyisobank.vhd (format=vpc)
+[storage] Spawned qemu-nbd PID=Some(5600) on port 10815
+[storage] qemu-nbd died, respawning on port 10816
+[storage] Exporting NBD on port 10816: Backing=/run/media/namobuddha/2tbnvV/anitix8g.vhd.vtoy (format=vpc)
+[storage] Spawned qemu-nbd PID=Some(5601) on port 10816
+[storage] qemu-nbd died, respawning on port 10817
+[storage] Exporting NBD on port 10817: Backing=/run/media/namobuddha/2tbnvV/artixEFIext4utility.img.vtoy (format=raw)
+[storage] Spawned qemu-nbd PID=Some(5602) on port 10817
+[storage] qemu-nbd died, respawning on port 10818
+[storage] Exporting NBD on port 10818: Backing=/run/media/namobuddha/2tbnvV/cwin10LTSCx15nuc.vhd (format=vpc)
+[storage] Spawned qemu-nbd PID=Some(5603) on port 10818
+[storage] qemu-nbd died, respawning on port 10819
+[storage] Exporting NBD on port 10819: Backing=/run/media/namobuddha/2tbnvV/initramfs.img (format=raw)
+[storage] Spawned qemu-nbd PID=Some(5604) on port 10819
+qemu-nbd: Failed to find an available port: Address already in use
+qemu-nbd: Failed to find an available port: Address already in use
+qemu-nbd: Failed to find an available port: Address already in use
+qemu-nbd: Failed to find an available port: Address already in use
+qemu-nbd: Failed to find an available port: Address already in use
+qemu-nbd: Failed to find an available port: Address already in use
+qemu-nbd: Failed to find an available port: Address already in use
+qemu-nbd: Failed to find an available port: Address already in use
+qemu-nbd: Failed to find an available port: Address already in use
+qemu-nbd: Failed to find an available port: Address already in use
+[2026-10-05 04:54:51] 127.0.0.1 - GET /vtoy/vmlinuz
+[2026-10-05 04:54:51] 127.0.0.1 - GET /vtoy/initramfs.img
+[2026-10-05 05:00:22] 127.0.0.1 - GET /boot.ipxe
+[storage] qemu-nbd died, respawning on port 10810
+[storage] Exporting NBD on port 10810: Backing=/run/media/namobuddha/2tbnvV/0000ub24upBEzfs.vhd.vtoy (format=vpc)
+[storage] Spawned qemu-nbd PID=Some(14782) on port 10810
+[storage] qemu-nbd died, respawning on port 10811
+[storage] Exporting NBD on port 10811: Backing=/run/media/namobuddha/2tbnvV/0001COSext4.vhd.vtoy (format=vpc)
+[storage] Spawned qemu-nbd PID=Some(14783) on port 10811
+[storage] qemu-nbd died, respawning on port 10812
+[storage] Exporting NBD on port 10812: Backing=/run/media/namobuddha/2tbnvV/0001artixbtrfs3070.img.vtoy (format=raw)
+[storage] Spawned qemu-nbd PID=Some(14784) on port 10812
+[storage] qemu-nbd died, respawning on port 10813
+[storage] Exporting NBD on port 10813: Backing=/run/media/namobuddha/2tbnvV/001ubext4VR.vhd.vtoy (format=vpc)
+[storage] Spawned qemu-nbd PID=Some(14785) on port 10813
+[storage] qemu-nbd died, respawning on port 10814
+[storage] Exporting NBD on port 10814: Backing=/run/media/namobuddha/2tbnvV/25h2.vhdx (format=vhdx)
+[storage] Spawned qemu-nbd PID=Some(14786) on port 10814
+[storage] qemu-nbd died, respawning on port 10815
+[storage] Exporting NBD on port 10815: Backing=/run/media/namobuddha/2tbnvV/Ventoyisobank.vhd (format=vpc)
+[storage] Spawned qemu-nbd PID=Some(14787) on port 10815
+[storage] qemu-nbd died, respawning on port 10816
+[storage] Exporting NBD on port 10816: Backing=/run/media/namobuddha/2tbnvV/anitix8g.vhd.vtoy (format=vpc)
+[storage] Spawned qemu-nbd PID=Some(14788) on port 10816
+[storage] qemu-nbd died, respawning on port 10817
+[storage] Exporting NBD on port 10817: Backing=/run/media/namobuddha/2tbnvV/artixEFIext4utility.img.vtoy (format=raw)
+[storage] Spawned qemu-nbd PID=Some(14789) on port 10817
+[storage] qemu-nbd died, respawning on port 10818
+[storage] Exporting NBD on port 10818: Backing=/run/media/namobuddha/2tbnvV/cwin10LTSCx15nuc.vhd (format=vpc)
+[storage] Spawned qemu-nbd PID=Some(14790) on port 10818
+[storage] qemu-nbd died, respawning on port 10819
+[storage] Exporting NBD on port 10819: Backing=/run/media/namobuddha/2tbnvV/initramfs.img (format=raw)
+[storage] Spawned qemu-nbd PID=Some(14791) on port 10819
+qemu-nbd:qemu-nbd:  Failed to find an available port: Address already in useFailed to find an available port: Address already in use
+
+qemu-nbd: Failed to find an available port: Address already in use
+qemu-nbd: Failed to find an available port: Address already in use
+qemu-nbd: Failed to find an available port: Address already in use
+qemu-nbd: Failed to find an available port: Address already in use
+qemu-nbd: Failed to find an available port: Address already in use
+qemu-nbd: Failed to find an available port: Address already in use
+qemu-nbd: Failed to find an available port: Address already in use
+qemu-nbd: Failed to find an available port: Address already in use
+[*] Received SIGTERM, shutting down Bridge...
+
+[*] Shutting down iventoy-ipxe...
+[storage] Unexporting iSCSI TID=104
+[storage] Unexporting iSCSI TID=105
+[storage] Unexporting iSCSI TID=108

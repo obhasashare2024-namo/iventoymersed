@@ -1,24 +1,33 @@
 [config] Loaded json config from: /run/media/namobuddha/2tbnvV/iventoy.json
 [storage] Exporting NBD on port 10810: Backing=/run/media/namobuddha/2tbnvV/0000ub24upBEzfs.vhd.vtoy (format=vpc)
-[storage] Spawned qemu-nbd PID=Some(15895) on port 10810
+[storage] Spawned qemu-nbd PID=Some(5211) on port 10810
 [storage] Exporting NBD on port 10811: Backing=/run/media/namobuddha/2tbnvV/0001COSext4.vhd.vtoy (format=vpc)
-[storage] Spawned qemu-nbd PID=Some(15896) on port 10811
+[storage] Spawned qemu-nbd PID=Some(5212) on port 10811
 [storage] Exporting NBD on port 10812: Backing=/run/media/namobuddha/2tbnvV/0001artixbtrfs3070.img.vtoy (format=raw)
-[storage] Spawned qemu-nbd PID=Some(15897) on port 10812
+[storage] Spawned qemu-nbd PID=Some(5213) on port 10812
 [storage] Exporting NBD on port 10813: Backing=/run/media/namobuddha/2tbnvV/001ubext4VR.vhd.vtoy (format=vpc)
-[storage] Spawned qemu-nbd PID=Some(15898) on port 10813
+[storage] Spawned qemu-nbd PID=Some(5214) on port 10813
 [storage] Exporting iSCSI: TID=104 IQN=iqn.2026.lan:vtoy:25h2_vhdx Backing=/run/media/namobuddha/2tbnvV/25h2.vhdx
 [storage] Exporting NBD on port 10814: Backing=/run/media/namobuddha/2tbnvV/25h2.vhdx (format=vhdx)
-[storage] Spawned qemu-nbd PID=Some(15903) on port 10814
+[storage] Spawned qemu-nbd PID=Some(5218) on port 10814
 [storage] Exporting iSCSI: TID=105 IQN=iqn.2026.lan:vtoy:Ventoyisobank_vhd Backing=/run/media/namobuddha/2tbnvV/Ventoyisobank.vhd
 [storage] Exporting NBD on port 10815: Backing=/run/media/namobuddha/2tbnvV/Ventoyisobank.vhd (format=vpc)
-[storage] Spawned qemu-nbd PID=Some(15908) on port 10815
+[storage] Spawned qemu-nbd PID=Some(5222) on port 10815
 [storage] Exporting NBD on port 10816: Backing=/run/media/namobuddha/2tbnvV/anitix8g.vhd.vtoy (format=vpc)
-[storage] Spawned qemu-nbd PID=Some(15909) on port 10816
+[storage] Spawned qemu-nbd PID=Some(5223) on port 10816
 [storage] Exporting NBD on port 10817: Backing=/run/media/namobuddha/2tbnvV/artixEFIext4utility.img.vtoy (format=raw)
-[storage] Spawned qemu-nbd PID=Some(15910) on port 10817
+[storage] Spawned qemu-nbd PID=Some(5224) on port 10817
 [storage] Exporting iSCSI: TID=108 IQN=iqn.2026.lan:vtoy:cwin10LTSCx15nuc_vhd Backing=/run/media/namobuddha/2tbnvV/cwin10LTSCx15nuc.vhd
 [storage] Exporting NBD on port 10818: Backing=/run/media/namobuddha/2tbnvV/cwin10LTSCx15nuc.vhd (format=vpc)
-[storage] Spawned qemu-nbd PID=Some(15914) on port 10818
-[*] iventoy-ipxe v2.0.0 (Pure Rust Standalone) running on 0.0.0.0:26001 mode=nbd pid=15861
-[2026-10-04 10:12:34] 127.0.0.1 - GET /
+[storage] Spawned qemu-nbd PID=Some(5228) on port 10818
+[storage] Exporting NBD on port 10819: Backing=/run/media/namobuddha/2tbnvV/initramfs.img (format=raw)
+[storage] Spawned qemu-nbd PID=Some(5229) on port 10819
+[*] iventoy-ipxe v3.0.0 (Pure Rust Standalone) running on 0.0.0.0:26001 mode=nbd pid=5192
+[2026-10-05 15:57:17] 127.0.0.1 - GET /boot.ipxe (Top-Level Dual Engine)
+[2026-10-05 15:57:44] 127.0.0.1 - GET /ipxe/menu-a (Engine A Standalone)
+[2026-10-05 15:58:18] 127.0.0.1 - GET /grub/grub.cfg (Engine B NetLoop)
+[2026-10-05 16:01:39] 127.0.0.1 - GET /boot.ipxe (Top-Level Dual Engine)
+[2026-10-05 16:01:44] 127.0.0.1 - GET /ipxe/menu-a (Engine A Standalone)
+[2026-10-05 16:04:54] 127.0.0.1 - GET /boot.ipxe (Top-Level Dual Engine)
+[2026-10-05 16:05:02] 127.0.0.1 - GET /boot.ipxe (Top-Level Dual Engine)
+[2026-10-05 16:05:03] 127.0.0.1 - GET /ipxe/menu-a (Engine A Standalone)
