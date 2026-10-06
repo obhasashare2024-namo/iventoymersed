@@ -575,10 +575,22 @@ impl StorageManager {
     pub async fn build_netloop_grub_cfg(&self) -> String {
         let snapshot = self.health_targets().await;
         let mut cfg = String::new();
-        cfg.push_str("set timeout=5\nset default=0\n\n");
-        cfg.push_str("set menu_color_normal=white/black\nset menu_color_highlight=black/cyan\n\n");
-        cfg.push_str("insmod all_video\nset gfxmode=1280x800,1024x768,auto\nset gfxpayload=keep\n\n");
+        cfg.push_str("set timeout=3
+");
+        cfg.push_str(r#"if [ -z "$net_default_server" ]; then set net_default_server=10.0.2.2; fi"#);
+        cfg.push_str("
+");
+        cfg.push_str(r#"set default=">> [Pure NetLoop] CachyOS 142GB Ext4 (0001COSext4.vhd.vtoy) <<""#);
+        cfg.push_str("
 
+");
+        cfg.push_str("set menu_color_normal=white/black
+set menu_color_highlight=black/cyan
+
+");
+        cfg.push_str("terminal_output vga_text console serial
+
+");
         for item in snapshot {
             if item.file.ends_with(".iso") {
                 cfg.push_str(&format!(

@@ -1,2 +1,2 @@
-c5da87e133fa09060c143356af56dcfa7b59b74f012f134cab8bb444e47a002f  dist/iventoy-ipxe
-128ddbbb4a40918a13205ef3578602f16e5e1310ce81bdae785ad6eb9bb90adf  dist/iventoy-ipxe-v2.0.0-linux-x86_64.tar.gz
+4b30f9e64089d398db19019d226ba7d029a6e68db094fb62caa0a810ea9f2f79  iventoymersed
+f5754a1168d017c5251b083670b9b436ecd23285906978c667fae70c7a35bca6  iventoymersed-v3.0.0-linux-x86_64.tar.gz
