@@ -96,7 +96,7 @@ async fn api_status(State(state): State<Arc<AppState>>) -> Response<Body> {
     let uptime = state.start.elapsed().as_secs_f64();
     let body = serde_json::to_string_pretty(&StatusOut {
         status: "ok",
-        version: "2.0.0-standalone",
+        version: env!("CARGO_PKG_VERSION"),
         pid: std::process::id(),
         uptime_seconds: uptime,
         rss_mb: get_rss_mb(),

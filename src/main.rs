@@ -100,18 +100,19 @@ async fn main() {
     let shutdown_state = state.clone();
     let shutdown = async move {
         wait_for_signal().await;
-        println!("\n[*] Shutting down iventoy-ipxe...");
-        shutdown_state.storage.shutdown_all().await;
-        std::process::exit(0);
+        println!("\n[*] Shutting down {} (draining connections)...", env!("CARGO_PKG_NAME"));
     };
 
-    axum::serve(
+    if let Err(e) = axum::serve(
         listener,
         app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
     )
     .with_graceful_shutdown(shutdown)
     .await
-    .unwrap();
+    {
+        eprintln!("[ERR] server error: {}", e);
+    }
+    shutdown_state.storage.shutdown_all().await;
 }
 
 async fn wait_for_signal() {
