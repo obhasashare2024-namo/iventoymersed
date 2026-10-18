@@ -24,6 +24,25 @@ pub fn sanitize_ipxe_key(key: &str) -> String {
     }
 }
 
+pub fn sanitize_iscsi_iqn_key(key: &str) -> String {
+    let clean: String = key
+        .to_ascii_lowercase()
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '.' {
+                c
+            } else {
+                '-'
+            }
+        })
+        .collect();
+    if clean.is_empty() {
+        "item".into()
+    } else {
+        clean
+    }
+}
+
 pub fn sanitize_ipxe_text(text: &str) -> String {
     let clean: String = text
         .chars()
@@ -163,6 +182,9 @@ impl StorageManager {
             .arg(port.to_string())
             .arg("-x")
             .arg("vtoy")
+            .arg("--cache=writeback")
+            .arg("--aio=threads")
+            .arg("--discard=unmap")
             .arg("-f")
             .arg(fmt_arg);
         cmd.arg(path);
@@ -262,7 +284,7 @@ impl StorageManager {
                 let fullpath = format!("{}/{}", vtoy_dir, filename);
                 let tid = self.alloc_tid().await;
                 let port = self.alloc_port().await;
-                let iqn = format!("{}:{}", iqn_prefix, sanitize_ipxe_key(&vtoy_id));
+                let iqn = format!("{}:{}", iqn_prefix, sanitize_iscsi_iqn_key(&vtoy_id));
                 let partitioned = has_partition_table(&fullpath).await;
                 
                 // Allow manual override from iventoy.json images config
@@ -309,14 +331,14 @@ impl StorageManager {
                 if is_win || boot_mode == BootMode::Iscsi {
                     self.export_iscsi(tid, &iqn, &fullpath).await;
                 }
-                if !is_win || boot_mode == BootMode::Nbd {
+                if !is_win {
                     child = self.export_nbd(port, &fullpath, fmt).await;
                 }
 
                 map.insert(vtoy_id.clone(), Target { info, child });
             } else {
                 let t = map.get_mut(&vtoy_id).unwrap();
-                if boot_mode == BootMode::Nbd || (!t.info.is_windows && t.child.is_some()) {
+                if !t.info.is_windows && (boot_mode == BootMode::Nbd || t.child.is_some()) {
                     let need_respawn = match t.child.as_mut() {
                         Some(c) => c.try_wait().ok().flatten().is_some(),
                         None => true,
@@ -422,7 +444,7 @@ impl StorageManager {
                 .unwrap_or_else(|| "shell".into())
         });
 
-        script.push_str(&format!("isset ${{menu-default}} || set menu-default {}\n\n", final_default));
+        script.push_str(&format!("set menu-default {}\n\n", final_default));
 
         script.push_str(":start\n");
         script.push_str("menu iVentoy-Rust Network Boot Menu (Arrow keys to navigate, Enter to boot)\n\n");
@@ -460,7 +482,7 @@ impl StorageManager {
                 // Submenu Handler: iSCSI
                 let iqn = sanitize_ipxe_text(&info.iqn);
                 handlers.push(format!(
-                    ":{}\necho Booting {} via Native iSCSI Target ({}) ...\nset root-path iscsi:${{next-server}}::::{}\nsanboot iscsi:${{next-server}}::::{} || goto boot_failed\n",
+                    ":{}\necho Booting {} via Native iSCSI Target ({}) ...\nset root-path iscsi:${{next-server}}:::1:{}\nsanboot iscsi:${{next-server}}:::1:{} || goto boot_failed\n",
                     iscsi_key, label, iqn, iqn, iqn
                 ));
 
@@ -534,8 +556,9 @@ impl StorageManager {
         script
     }
 
-    /// Builds the top-level dual-engine selector menu with configurable timeout
+    /// Builds the top-level unified OS boot menu (eliminating dual-engine selector delay)
     pub async fn build_top_level_ipxe_menu(&self, _client_mac: Option<&str>) -> String {
+        let snapshot = self.health_targets().await;
         let mut script = String::new();
         script.push_str("#!ipxe\n\n");
         script.push_str("# Styling & Palette (Ventoy Cyber Theme)\n");
@@ -544,31 +567,96 @@ impl StorageManager {
         script.push_str("cpair --foreground 3 --background 0 2 ||\n\n");
 
         script.push_str("set menu-timeout 5000\n");
-        script.push_str("isset ${menu-default} || set menu-default engine_track_a\n\n");
+        script.push_str("isset ${menu-default} || set menu-default iso_grub_UQi_USBsys_2023_btrfs_iso\n\n");
 
         script.push_str(":start\n");
-        script.push_str("menu iventoymersed Dual-Engine Selector (Auto-booting in 5s)\n\n");
-        script.push_str("item --gap -- ================= Select Boot Engine =================\n");
-        script.push_str("item engine_track_a [Engine A] iVentoy-iPXE NBD Hook Mode (Fast Client, Low RAM)\n");
-        script.push_str("item engine_track_b [Engine B] Pure NetLoop HTTP 206 Mode (Zero Server State)\n\n");
-        script.push_str("item --gap -- ================= Operations & Tools =================\n");
+        script.push_str("menu iventoymersed Unified OS Boot Menu\n\n");
+
+        let mut win_items = Vec::new();
+        let mut linux_items = Vec::new();
+        let mut iso_items = Vec::new();
+        let mut handlers = Vec::new();
+
+        for item in &snapshot {
+            let safe_id = sanitize_ipxe_key(&item.id);
+            let label = sanitize_ipxe_text(&item.file);
+
+            if item.is_windows {
+                let key = format!("win_{}", safe_id);
+                win_items.push(format!("item {} [WIN] {} (Scheme A: iSCSI/iBFT SANBOOT)", key, label));
+                let iqn = sanitize_ipxe_text(&item.iqn);
+                handlers.push(format!(
+                    ":{}\necho Booting {} via Scheme A (Native iSCSI/iBFT SANBOOT)...\nset root-path iscsi:${{next-server}}:::1:{}\nsanboot iscsi:${{next-server}}:::1:{} || goto boot_failed\n",
+                    key, label, iqn, iqn
+                ));
+            } else if item.file.to_ascii_lowercase().ends_with(".iso") {
+                let key_a = format!("iso_{}", safe_id);
+                let key_b = format!("iso_grub_{}", safe_id);
+                iso_items.push(format!("item {} [ISO] {} (Scheme A: HTTP Range SANBOOT)", key_a, label));
+                iso_items.push(format!("item {} [ISO] {} [Scheme B: NetLoop GRUB]", key_b, label));
+
+                handlers.push(format!(
+                    ":{}\necho Booting {} via Scheme A (iPXE HTTP Range SANBOOT)...\nsanboot http://${{next-server}}:26001/iso/{} || goto boot_failed\n",
+                    key_a, label, item.file
+                ));
+                handlers.push(format!(
+                    ":{}\necho Handing off {} to Scheme B (NetLoop GRUB Subsystem)...\niseq ${{platform}} efi && chain http://${{next-server}}:26001/grub/grubnet.efi || chain http://${{next-server}}:26001/grub/core.0 || goto boot_failed\n",
+                    key_b, label
+                ));
+            } else {
+                let key_b = format!("vdisk_{}", safe_id);
+                let key_a = format!("vdisk_nbd_{}", safe_id);
+                linux_items.push(format!("item {} [{}] {} (Default: Scheme B NetLoop GRUB)", key_b, item.format.to_uppercase(), label));
+                linux_items.push(format!("item {} [{}] {} [Scheme A: iVentoy NBD Hook]", key_a, item.format.to_uppercase(), label));
+
+                handlers.push(format!(
+                    ":{}\necho Handing off {} to Scheme B (NetLoop GRUB Subsystem)...\niseq ${{platform}} efi && chain http://${{next-server}}:26001/grub/grubnet.efi || chain http://${{next-server}}:26001/grub/core.0 || goto boot_failed\n",
+                    key_b, label
+                ));
+                handlers.push(format!(
+                    ":{}\necho Booting {} via Scheme A (iVentoy NBD Hook, Port {})...\nkernel http://${{next-server}}:26001/vtoy/vmlinuz initrd=initramfs.img console=ttyS0 console=tty0 ip=dhcp nbdroot=${{next-server}} nbdport={} nbdmaxpart=16 root={} rw nosplash verbose\ninitrd http://${{next-server}}:26001/vtoy/initramfs.img\nboot || goto boot_failed\n",
+                    key_a, label, item.nbd_port, item.nbd_port, item.root_dev
+                ));
+            }
+        }
+
+        if !win_items.is_empty() {
+            script.push_str("item --gap -- ==================== Windows Systems (Scheme A Only) ====================\n");
+            for it in win_items {
+                script.push_str(&format!("{}\n", it));
+            }
+        }
+
+        if !linux_items.is_empty() {
+            script.push_str("\nitem --gap -- ==================== Linux Systems (Default Scheme B) ====================\n");
+            for it in linux_items {
+                script.push_str(&format!("{}\n", it));
+            }
+        }
+
+        if !iso_items.is_empty() {
+            script.push_str("\nitem --gap -- ==================== ISO / WinPE Systems ====================\n");
+            for it in iso_items {
+                script.push_str(&format!("{}\n", it));
+            }
+        }
+
+        script.push_str("\nitem --gap -- ==================== Operations & Tools =================\n");
         script.push_str("item shell  Drop into iPXE Shell\n");
         script.push_str("item reboot Reboot Computer\n");
         script.push_str("item exit   Exit to Local BIOS/UEFI\n\n");
 
-        script.push_str("choose --timeout ${menu-timeout} --default ${menu-default} selected || goto engine_track_a\n");
+        script.push_str("choose --timeout ${menu-timeout} --default ${menu-default} selected || goto shell\n");
         script.push_str("goto ${selected}\n\n");
-
-        script.push_str(":engine_track_a\n");
-        script.push_str("echo Loading Engine A (iVentoy-iPXE Subsystem)...\n");
-        script.push_str("chain http://${next-server}:26001/ipxe/menu-a || goto boot_failed\n\n");
-
-        script.push_str(":engine_track_b\n");
-        script.push_str("echo Loading Engine B (Pure NetLoop GRUB Subsystem)...\n");
-        script.push_str("chain http://${next-server}:26001/grub/core.0 || goto boot_failed\n\n");
 
         script.push_str(":shell\nshell\n\n:reboot\nreboot\n\n:exit\nexit\n\n");
         script.push_str(":boot_failed\necho Boot failed or cancelled! Dropping to shell in 5 seconds...\nsleep 5\ngoto shell\n\n");
+
+        for h in handlers {
+            script.push_str(&h);
+            script.push_str("\n");
+        }
+
         script
     }
 
@@ -576,37 +664,36 @@ impl StorageManager {
     pub async fn build_netloop_grub_cfg(&self) -> String {
         let snapshot = self.health_targets().await;
         let mut cfg = String::new();
-        cfg.push_str("set timeout=3
-");
-        cfg.push_str(r#"if [ -z "$net_default_server" ]; then set net_default_server=10.0.2.2; fi"#);
-        cfg.push_str("
-");
-        cfg.push_str(r#"set default=">> [Pure NetLoop] CachyOS 142GB Ext4 (0001COSext4.vhd.vtoy) <<""#);
-        cfg.push_str("
-
-");
-        cfg.push_str("set menu_color_normal=white/black
-set menu_color_highlight=black/cyan
-
-");
-        cfg.push_str("terminal_output vga_text console serial
-
-");
+        cfg.push_str("set timeout=5\n");
+        cfg.push_str(r#"if [ -z "$net_default_server" ]; then set net_default_server=192.168.122.1; fi"#);
+        cfg.push_str("\n");
+        cfg.push_str("set default=winpe_cpio\n\n");
+        cfg.push_str("set menu_color_normal=white/black\nset menu_color_highlight=black/cyan\n\n");
         for item in snapshot {
-            if item.file.ends_with(".iso") {
+            if item.file.contains("2023_btrfs") {
+                cfg.push_str(&format!(
+                    "menuentry \">> [NetLoop WinPE CPIO Wimboot] {} <<\" --id winpe_cpio {{\n    insmod http\n    insmod linux\n    echo \"[1/3] Loading wimboot binary...\"\n    linux (http,${{net_default_server}}:26001)/iso/wimboot.x86_64\n    echo \"[2/3] Loading WinPE pre-packed CPIO RAMDisk (131MB)...\"\n    initrd (http,${{net_default_server}}:26001)/iso/winpe_test.cpio\n    echo \"[3/3] Executing wimboot and launching WinPE...\"\n    boot\n}}\n\nmenuentry \">> [NetLoop WinPE Direct EFI] {} <<\" --id winpe_direct {{\n    insmod http\n    insmod loopback\n    insmod iso9660\n    insmod chain\n    echo \"[1/2] Establishing HTTP 206 Loopback to {}...\"\n    loopback loop (http,${{net_default_server}}:26001)/iso/{}\n    echo \"[2/2] Chainloading EFI bootloader from loopback...\"\n    chainloader (loop)/efi/boot/bootx64.efi\n    boot\n}}\n\n",
+                    item.file, item.file, item.file, item.file
+                ));
+            } else if item.file.ends_with(".iso") {
                 cfg.push_str(&format!(
                     "menuentry \">> [NetLoop ISO] {} <<\" {{\n    insmod http\n    insmod loopback\n    insmod iso9660\n    loopback loop (http,${{net_default_server}}:26001)/iso/{}\n    boot\n}}\n\n",
                     item.file, item.file
                 ));
             } else if item.file.contains("COS") {
                 cfg.push_str(&format!(
-                    "menuentry \">> [Pure NetLoop] CachyOS 142GB Ext4 ({}) <<\" {{\n    insmod http\n    insmod loopback\n    insmod part_gpt\n    insmod ext2\n    insmod linux\n    echo \"[1/4] Establishing HTTP 206 Loopback to {}...\"\n    loopback loop (http,${{net_default_server}}:26001)/iso/{}\n    echo \"[2/4] Parsing internal GPT table and extracting CachyOS kernel...\"\n    linux (loop,gpt2)/boot/vmlinuz-linux-cachyos console=ttyS0 console=tty0 root=UUID=f80dc16b-e328-40f4-8db8-f30faf11a445 ro verbose\n    echo \"[3/4] Extracting CachyOS native initramfs from loopback block device...\"\n    initrd (loop,gpt2)/boot/initramfs-linux-cachyos.img\n    echo \"[4/4] Executing kernel and launching CachyOS...\"\n    boot\n}}\n\n",
-                    item.file, item.file, item.file
+                    "menuentry \">> [Pure NetLoop] CachyOS 142GB Ext4 ({}) <<\" --id cachyos {{\n    insmod http\n    insmod loopback\n    insmod part_gpt\n    insmod ext2\n    insmod linux\n    echo \"[1/4] Establishing HTTP 206 Loopback to {}...\"\n    loopback loop (http,${{net_default_server}}:26001)/iso/{}\n    echo \"[2/4] Parsing internal GPT table and extracting CachyOS kernel...\"\n    linux (loop,gpt2)/boot/vmlinuz-linux-cachyos console=tty0 console=ttyS0,115200 ip=dhcp nbdroot=${{net_default_server}} nbdport={} nbdmaxpart=16 root=/dev/nbd0p2 rw nosplash verbose\n    echo \"[3/4] Extracting CachyOS native initramfs from loopback block device...\"\n    initrd (loop,gpt2)/boot/initramfs-linux-cachyos.img\n    echo \"[4/4] Executing kernel and launching CachyOS...\"\n    boot\n}}\n\n",
+                    item.file, item.file, item.file, item.nbd_port
                 ));
             } else if item.file.contains("anitix") {
                 cfg.push_str(&format!(
-                    "menuentry \">> [Pure NetLoop] antiX Linux 8GB Btrfs ({}) <<\" {{\n    insmod http\n    insmod loopback\n    insmod part_gpt\n    insmod btrfs\n    insmod linux\n    echo \"[1/4] Establishing HTTP 206 Loopback to {}...\"\n    loopback loop (http,${{net_default_server}}:26001)/iso/{}\n    echo \"[2/4] Parsing GPT and extracting antiX kernel...\"\n    linux (loop,gpt3)/boot/vmlinuz-6.6.119-antix.1-amd64-smp console=ttyS0 console=tty0 root=UUID=d1b65f8f-9d38-4e06-a902-8ff9240921c5 ro verbose\n    echo \"[3/4] Extracting antiX native initramfs...\"\n    initrd (loop,gpt3)/boot/initrd.img-6.6.119-antix.1-amd64-smp\n    echo \"[4/4] Executing kernel...\"\n    boot\n}}\n\n",
-                    item.file, item.file, item.file
+                    "menuentry \">> [Pure NetLoop] antiX Linux 8GB Btrfs ({}) <<\" --id antix {{\n    insmod http\n    insmod loopback\n    insmod part_gpt\n    insmod btrfs\n    insmod linux\n    echo \"[1/4] Establishing HTTP 206 Loopback to {}...\"\n    loopback loop (http,${{net_default_server}}:26001)/iso/{}\n    echo \"[2/4] Parsing GPT and extracting antiX native kernel...\"\n    linux (loop,gpt3)/boot/vmlinuz-6.6.119-antix.1-amd64-smp console=tty0 console=ttyS0,115200 ip=dhcp nbdroot=${{net_default_server}} nbdport={} nbdmaxpart=16 root=/dev/nbd0p3 rw nosplash verbose\n    echo \"[3/4] Extracting antiX native initramfs from loopback block device...\"\n    initrd (loop,gpt3)/boot/initrd.img-6.6.119-antix.1-amd64-smp\n    echo \"[4/4] Executing kernel and launching antiX Full Desktop...\"\n    boot\n}}\n\n",
+                    item.file, item.file, item.file, item.nbd_port
+                ));
+            } else if item.is_windows {
+                cfg.push_str(&format!(
+                    "menuentry \">> [NetLoop Win] {} (Handoff to iSCSI/iBFT SANBOOT) <<\" {{\n    echo \"[NetLoop] Windows VHDX requires native iSCSI/iBFT block driver...\"\n    echo \"[NetLoop] Delegating to iPXE iBFT subsystem...\"\n    chainloader (http,${{net_default_server}}:26001)/iso/test_win11.ipxe\n    boot\n}}\n\n",
+                    item.file
                 ));
             } else {
                 cfg.push_str(&format!(

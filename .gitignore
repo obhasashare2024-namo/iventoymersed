@@ -1,2 +1,9 @@
 /target
 *.log
+*.bak
+.bak/
+dist/.bak/
+dist/*-highperf*
+dist/*-original
+dist/iventoy-ipxe*
+screenshots/

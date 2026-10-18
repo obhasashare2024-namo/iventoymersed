@@ -7,65 +7,42 @@
 
 ## 🚀 項目概述 (Overview)
 
-`iventoymersed`（名稱取自 **iVentoy Merged & Immersed**，象徵雙引擎無縫融合與沈浸式體驗）將先前的兩種網絡引導技術流派徹底融合為**單一二進制程序**（1.7 MB）：
+`iventoymersed`（名稱取自 **iVentoy Merged & Immersed**，象徵雙引擎無縫融合與沈浸式體驗）將兩種網絡引導技術流派徹底融合為**單一二進制程序**（1.7 MB）：
 
-1. **Engine A（iVentoy iPXE 輕量網絡引導）**：
+1. **Engine A（iVentoy iPXE 原生塊設備引導）**：
    - 伺服器端負責多端口動態掛載與塊設備導出（QEMU NBD 10810~10819 / tgt iSCSI 3260）。
-   - 客戶端直接執行原語級 `sanboot --drive 0x80` 或 `nbd://`，客戶端內核負擔極低，適合 Windows 全虛擬磁盤（VHD/VHDX）與輕量無盤工作站。
-2. **Engine B（NetLoop GRUB 深度循環掛載引導）**：
+   - 客戶端直接執行原語級 `sanboot iscsi:${next-server}:::1:...` 或 `nbd://`，客戶端內核負擔極低，**Windows 11 VHDX 強制走此軌道**，保證原生讀寫與 0 RAM 耗損。
+2. **Engine B（NetLoop GRUB HTTP 206 循環掛載引導）**：
    - 伺服器端僅需標準 HTTP 206 Byte-Range 串流，零額外背景守護進程，伺服器負載接近零。
-   - 客戶端 GRUB 利用 `loopback loop (http,server:26001)/disks/xxx.vhd.vtoy` 於客戶端記憶體掛載磁盤分區，直接抓取內核與 initramfs，適合多發行版 Linux 深度安裝與救援。
+   - 客戶端 GRUB 利用 `loopback loop (http,server:26001)/disks/xxx.vhd.vtoy` 於客戶端記憶體掛載磁盤分區，直接抓取內核與 initramfs，**Linux 原生 ISO / VHD 預設走此軌道**。
+3. **WinPE ISO 原生 HTTP Range 接管（Engine B 延伸）**：
+   - 針對 WinPE ISO，GRUB2 EFI 缺乏主機板 BlockIO 鉤子會導致微軟 bootmgr 報 `0xc000000e` 死鎖；
+   - 系統在選單中預設採用 iPXE HTTP Range 206 `sanboot` 接管 WinPE，實測直通進入 2048x2048 桌面。
 
 ---
 
-## ⏱️ 開機時序與精確時間點實測 (Timing & Screenshots)
+## 🔀 統一作業系統選單機制 (Unified OS Boot Menu)
 
-在 QEMU / KVM 實機與虛擬網卡（virtio-net-pci）測試中，各階段耗時與前端選單渲染節點精確記錄如下：
-
-| 時間點 (s) | 系統階段 | 客戶端行為 / 畫面表現 | 產物截圖對應 |
-| :--- | :--- | :--- | :--- |
-| **0.0s** | Power On | BIOS/UEFI POST 執行，加載 iPXE ROM | - |
-| **2.5s ~ 4.5s** | DHCP & Link | 網卡鏈路就緒，DHCP 獲取 IP (`10.0.2.15`) | - |
-| **5.0s** | Fetch Boot Menu | 客戶端向 `:26001/boot.ipxe` 發起 GET 請求 | - |
-| **6.6s 精確點** | **首級雙軌選單彈出** | 螢幕顯示 `iventoymersed Dual-Engine Selector`，帶 5 秒倒數計時 `(5)`，預設選中 Engine A | `dual_engine_selector_prompt.png` |
-| **7.2s** | 按鍵交互 / 切換 | 按下方向鍵下，高亮切換為 `[Engine B] NetLoop GRUB Loopback Engine` | `dual_engine_highlight_b.png` |
-| **選定瞬間** | **自動劃分子系統** | 客戶端根據選擇自動 chain 對應端點，完成前端界面自動劃分 | `dual_engine_partitioned_a.png` |
-
----
-
-## 🔀 前端自動劃分機制 (Automatic Subsystem Partitioning)
-
-在首級雙軌選單做出選擇後，系統採用 **iPXE Dynamic Chain-loading** 實現前端子界面的自動劃分與交接，無須客戶端重啟或重新 DHCP：
+自 **v3.1.0** 起，徹底取消了首級 5 秒 Dual-Engine 選擇器延遲，直接進入統一作業系統選單（Unified OS Boot Menu），各作業系統依特性自動路由至最佳引擎：
 
 ```mermaid
 flowchart TD
     Client[客戶端 PXE 開機] --> DHCP[DHCP 獲取 IP]
-    DHCP --> M0[首級選單: /boot.ipxe\n(倒數 5 秒自動引導)]
+    DHCP --> M0[統一選單: /boot.ipxe\n(Unified OS Boot Menu)]
     
-    M0 -->|選擇 Engine A 或超時| AutoA[自動劃分進入: /ipxe/menu-a]
-    M0 -->|選擇 Engine B| AutoB[自動劃分進入: /grub/core.0]
-    
-    subgraph Engine A: iVentoy iPXE 子系統
-        AutoA --> MA[Engine A 專屬子選單\n(動態列出 VHD/VHDX/RAW/ISO)]
-        MA --> BootNBD[NBD / iSCSI 原語級 sanboot 啟動]
-    end
-    
-    subgraph Engine B: NetLoop GRUB 子系統
-        AutoB --> MB[GRUB netboot 核心加載]
-        MB --> CFG[動態讀取 /boot/grub/grub.cfg]
-        CFG --> LoopHTTP[HTTP 206 Byte-Range 深度分區循環掛載]
-    end
+    M0 -->|Windows 11 VHDX| WinTrack[Engine A: Native iSCSI/iBFT SANBOOT\n(原生可讀寫 / 0 RAM 耗損)]
+    M0 -->|Linux VHD / ISO| LinuxTrack[Engine B: NetLoop GRUB Loopback\n(預設 HTTP 206 / 可切換 NBD Hook)]
+    M0 -->|WinPE ISO| PETrack[Engine B 接管: iPXE HTTP Range SANBOOT\n(杜絕 0xc000000e / 直通桌面)]
 ```
 
-### 1. 選擇 Engine A (iVentoy iPXE)
-客戶端收到指令 `chain http://${next-server}:26001/ipxe/menu-a`。
-iPXE 即刻清除首級選單，並在相同終端控制台繪製 **Engine A 二級子選單**：
-- 自動嗅探的虛擬磁盤列表（如 `0001COSext4.vhd.vtoy`、`vdisk_win10.vhd` 等）。
-- 底部附帶返回首級選單按鍵 `[99] Return to Dual-Engine Selector`。
+### 1. Windows 11 (VHDX) 專屬路由
+直接通過 iPXE `sanboot iscsi:${next-server}:::1:${iqn}` 原生掛載 tgt iSCSI Target，建立標準 iBFT 映射表交付 Windows 內核接管，實測可讀寫且不消耗任何客戶端記憶體。
 
-### 2. 選擇 Engine B (NetLoop GRUB)
-客戶端收到指令 `chain http://${next-server}:26001/grub/core.0`（或 UEFI 模式 `grubnet.efi`）。
-iPXE 將機器控制權無縫移交給 GRUB 網絡啟動核心，GRUB 隨後接管螢幕並繪製全功能 GRUB2 藍底界面，執行分區循環掛載。
+### 2. Linux (VHD / ISO) 雙引擎支援
+預設引導 NetLoop GRUB2 核心，透過 HTTP 206 Byte-Range 於記憶體解析 GPT 表並抽取內核與 initramfs；若需完整 NBD 塊設備，亦可在選單中一鍵切換 iVentoy NBD Hook 模式。
+
+### 3. WinPE (ISO) 韌體 BlockIO 支援
+鑑於 UEFI 韌體中 GRUB2 chainloader 卸載後缺乏韌體 BlockIO 驅動導致微軟 bootmgr 報 `0xc000000e` 死鎖，系統自動指派 iPXE HTTP Range 206 `sanboot` 接管 WinPE，完美進入桌面。
 
 ---
 

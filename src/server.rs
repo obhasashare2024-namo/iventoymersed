@@ -151,6 +151,7 @@ async fn serve_static(path: &str, is_head: bool, range: Option<&header::HeaderVa
                                         .header(header::CONTENT_LENGTH, chunk_len)
                                         .header(header::CONTENT_RANGE, format!("bytes {}-{}/{}", start_pos, end_pos, len))
                                         .header(header::ACCEPT_RANGES, "bytes")
+                                        .header(header::CONNECTION, "close")
                                         .body(if is_head { Body::empty() } else { Body::from_stream(stream) })
                                         .unwrap();
                                 }
@@ -166,8 +167,31 @@ async fn serve_static(path: &str, is_head: bool, range: Option<&header::HeaderVa
                     .header(header::CONTENT_TYPE, "application/octet-stream")
                     .header(header::CONTENT_LENGTH, len)
                     .header(header::ACCEPT_RANGES, "bytes")
+                    .header(header::CONNECTION, "close")
                     .body(Body::empty())
                     .unwrap()
+            } else if len < 10 * 1024 * 1024 {
+                // In-memory buffer for small files (kernel, wimboot, initrd) to eliminate streaming latency
+                if let Ok(bytes) = tokio::fs::read(path).await {
+                    Response::builder()
+                        .status(StatusCode::OK)
+                        .header(header::CONTENT_TYPE, "application/octet-stream")
+                        .header(header::CONTENT_LENGTH, bytes.len())
+                        .header(header::ACCEPT_RANGES, "bytes")
+                        .header(header::CONNECTION, "close")
+                        .body(Body::from(bytes))
+                        .unwrap()
+                } else {
+                    let stream = ReaderStream::new(file);
+                    Response::builder()
+                        .status(StatusCode::OK)
+                        .header(header::CONTENT_TYPE, "application/octet-stream")
+                        .header(header::CONTENT_LENGTH, len)
+                        .header(header::ACCEPT_RANGES, "bytes")
+                        .header(header::CONNECTION, "close")
+                        .body(Body::from_stream(stream))
+                        .unwrap()
+                }
             } else {
                 let stream = ReaderStream::new(file);
                 let body = Body::from_stream(stream);
@@ -176,6 +200,7 @@ async fn serve_static(path: &str, is_head: bool, range: Option<&header::HeaderVa
                     .header(header::CONTENT_TYPE, "application/octet-stream")
                     .header(header::CONTENT_LENGTH, len)
                     .header(header::ACCEPT_RANGES, "bytes")
+                    .header(header::CONNECTION, "close")
                     .body(body)
                     .unwrap()
             }
@@ -337,6 +362,7 @@ async fn track_b_grub_handler(
         .status(StatusCode::OK)
         .header(header::CONTENT_TYPE, "text/plain; charset=utf-8")
         .header(header::CONTENT_LENGTH, cfg_text.len())
+        .header(header::CONNECTION, "close")
         .body(Body::from(cfg_text))
         .unwrap()
 }
