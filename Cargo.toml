@@ -1,8 +1,8 @@
 [package]
 name = "iventoymersed"
-version = "3.1.0"
+version = "3.1.1"
 edition = "2021"
-description = "iventoymersed: 100% Pure Rust Dual-Engine Network Boot Server"
+description = "iventoymersed: 100% Pure Rust Dual-Engine Network Boot Server with In-Tree NBD"
 
 [dependencies]
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "process", "signal", "time", "sync", "fs", "io-util"] }
@@ -11,6 +11,7 @@ reqwest = { version = "0.12", default-features = false }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio-util = { version = "0.7", features = ["io"] }
+libc = "0.2"
 
 [profile.release]
 strip = true

@@ -7,3 +7,4 @@ dist/*-highperf*
 dist/*-original
 dist/iventoy-ipxe*
 screenshots/
+.__smbfile*

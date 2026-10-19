@@ -60,6 +60,7 @@ pub struct TargetInfo {
     pub tid: u32,
     pub iqn: String,
     pub nbd_port: u16,
+    pub backend_type: String,
     #[serde(skip)]
     pub proc_pid: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -68,6 +69,11 @@ pub struct TargetInfo {
     pub root_dev: String,
     pub format: String,
     pub is_windows: bool,
+}
+
+pub enum NbdBackend {
+    Embedded(crate::nbd_server::EmbeddedNbdServer),
+    External(Child),
 }
 
 pub struct StorageManager {
@@ -79,7 +85,7 @@ pub struct StorageManager {
 
 struct Target {
     info: TargetInfo,
-    child: Option<Child>,
+    backend: Option<NbdBackend>,
 }
 
 fn log(msg: &str) {
@@ -171,9 +177,9 @@ impl StorageManager {
         .await;
     }
 
-    async fn export_nbd(&self, port: u16, path: &str, fmt: DiskFormat) -> Option<Child> {
+    async fn export_qemu_nbd(&self, port: u16, path: &str, fmt: DiskFormat) -> Option<Child> {
         let fmt_arg = fmt.as_qemu_arg();
-        log(&format!("Exporting NBD on port {}: Backing={} (format={})", port, path, fmt_arg));
+        log(&format!("Exporting via qemu-nbd on port {}: Backing={} (format={})", port, path, fmt_arg));
         let mut cmd = Command::new("qemu-nbd");
         cmd.arg("-t")
             .arg("-e")
@@ -201,6 +207,23 @@ impl StorageManager {
         }
     }
 
+    async fn export_nbd(&self, port: u16, path: &str, fmt: DiskFormat) -> (Option<NbdBackend>, String) {
+        if fmt == DiskFormat::Raw || fmt == DiskFormat::Iso {
+            log(&format!("Exporting via In-Tree Pure Rust NBD Server on port {}: Backing={}", port, path));
+            match crate::nbd_server::EmbeddedNbdServer::start(port, path, "vtoy").await {
+                Ok(srv) => (Some(NbdBackend::Embedded(srv)), "in-tree-rust-nbd".to_string()),
+                Err(e) => {
+                    eprintln!("[ERR] Failed to start In-Tree NBD server on port {}: {}. Falling back to qemu-nbd.", port, e);
+                    let c = self.export_qemu_nbd(port, path, fmt).await;
+                    (c.map(NbdBackend::External), "qemu-nbd".to_string())
+                }
+            }
+        } else {
+            let c = self.export_qemu_nbd(port, path, fmt).await;
+            (c.map(NbdBackend::External), "qemu-nbd".to_string())
+        }
+    }
+
     async fn unexport_iscsi(&self, tid: u32) {
         log(&format!("Unexporting iSCSI TID={}", tid));
         let t = tid.to_string();
@@ -225,9 +248,14 @@ impl StorageManager {
         if boot_mode == BootMode::Iscsi || t.info.is_windows {
             self.unexport_iscsi(t.info.tid).await;
         }
-        if let Some(mut c) = t.child.take() {
-            let _ = c.kill().await;
-            let _ = c.wait().await;
+        if let Some(backend) = t.backend.take() {
+            match backend {
+                NbdBackend::Embedded(mut srv) => srv.shutdown(),
+                NbdBackend::External(mut c) => {
+                    let _ = c.kill().await;
+                    let _ = c.wait().await;
+                }
+            }
         }
     }
 
@@ -312,6 +340,12 @@ impl StorageManager {
                 let fmt = detect_disk_format(&fullpath).await;
                 let is_win = is_windows_image(&filename);
 
+                let (backend, b_type) = if !is_win {
+                    self.export_nbd(port, &fullpath, fmt).await
+                } else {
+                    (None, "iscsi-ibft".to_string())
+                };
+
                 let info = TargetInfo {
                     id: vtoy_id.clone(),
                     file: filename.clone(),
@@ -319,6 +353,7 @@ impl StorageManager {
                     tid,
                     iqn: iqn.clone(),
                     nbd_port: port,
+                    backend_type: b_type,
                     proc_pid: None,
                     alive: None,
                     has_partitions: partitioned,
@@ -327,28 +362,27 @@ impl StorageManager {
                     is_windows: is_win,
                 };
 
-                let mut child = None;
                 if is_win || boot_mode == BootMode::Iscsi {
                     self.export_iscsi(tid, &iqn, &fullpath).await;
                 }
-                if !is_win {
-                    child = self.export_nbd(port, &fullpath, fmt).await;
-                }
 
-                map.insert(vtoy_id.clone(), Target { info, child });
+                map.insert(vtoy_id.clone(), Target { info, backend });
             } else {
                 let t = map.get_mut(&vtoy_id).unwrap();
-                if !t.info.is_windows && (boot_mode == BootMode::Nbd || t.child.is_some()) {
-                    let need_respawn = match t.child.as_mut() {
-                        Some(c) => c.try_wait().ok().flatten().is_some(),
+                if !t.info.is_windows && (boot_mode == BootMode::Nbd || t.backend.is_some()) {
+                    let need_respawn = match t.backend.as_mut() {
+                        Some(NbdBackend::Embedded(_)) => false,
+                        Some(NbdBackend::External(c)) => c.try_wait().ok().flatten().is_some(),
                         None => true,
                     };
                     if need_respawn {
                         let port = t.info.nbd_port;
-                        log(&format!("qemu-nbd died, respawning on port {}", port));
+                        log(&format!("External qemu-nbd died, respawning on port {}", port));
                         let path = t.info.path.clone();
                         let fmt = detect_disk_format(&path).await;
-                        t.child = self.export_nbd(port, &path, fmt).await;
+                        let (b, bt) = self.export_nbd(port, &path, fmt).await;
+                        t.backend = b;
+                        t.info.backend_type = bt;
                     }
                 }
             }
@@ -374,14 +408,21 @@ impl StorageManager {
         let mut out = Vec::new();
         for (_, t) in map.iter_mut() {
             let mut info = t.info.clone();
-            if boot_mode == BootMode::Nbd || t.child.is_some() {
-                info.alive = Some(match t.child.as_mut() {
-                    Some(c) => c.try_wait().ok().flatten().is_none(),
-                    None => false,
-                });
-                info.proc_pid = t.child.as_ref().and_then(|c| c.id());
-            } else {
+            if let Some(backend) = t.backend.as_mut() {
+                match backend {
+                    NbdBackend::Embedded(_) => {
+                        info.alive = Some(true);
+                        info.proc_pid = None;
+                    }
+                    NbdBackend::External(c) => {
+                        info.alive = Some(c.try_wait().ok().flatten().is_none());
+                        info.proc_pid = c.id();
+                    }
+                }
+            } else if boot_mode == BootMode::Iscsi || info.is_windows {
                 info.alive = Some(true);
+            } else {
+                info.alive = Some(false);
             }
             out.push(info);
         }

@@ -7,15 +7,20 @@
 
 ## 🚀 項目概述 (Overview)
 
-`iventoymersed`（名稱取自 **iVentoy Merged & Immersed**，象徵雙引擎無縫融合與沈浸式體驗）將兩種網絡引導技術流派徹底融合為**單一二進制程序**（1.7 MB）：
+`iventoymersed`（名稱取自 **iVentoy Merged & Immersed**，象徵雙引擎無縫融合與沈浸式體驗）將兩種網絡引導技術流派徹底融合為**單一二進制程序**（1.8 MB）：
 
-1. **Engine A（iVentoy iPXE 原生塊設備引導）**：
-   - 伺服器端負責多端口動態掛載與塊設備導出（QEMU NBD 10810~10819 / tgt iSCSI 3260）。
+1. **In-Tree Pure Rust NBD Server (v3.1.1 最新突破)**：
+   - **徹底擺脫外部 qemu-nbd 依賴**：對所有 Raw / 稀疏（Sparse）`.img`、`.raw`、`.iso` 鏡像，全部由內置 Pure Rust NBD 異步引擎接管；
+   - **毫秒級 Fixed Newstyle 握手**：完整實作 `NBD_OPT_EXPORT_NAME`、`NBD_OPT_GO`、`NBD_OPT_LIST` 等現代協商協定；
+   - **原生 TRIM 空洞穿透（Hole Punching）**：支援 `libc::fallocate` TRIM 指令，磁區寫入與釋放自動回收稀疏檔案空間；
+   - **極致無鎖並行 I/O**：底層採用 `FileExt::read_exact_at` / `write_all_at`（`pread`/`pwrite`），零 mutex 競爭，並發吞吐極致強悍。
+2. **Engine A（iVentoy iPXE 原生塊設備引導）**：
+   - 伺服器端負責多端口動態掛載與塊設備導出（In-Tree Rust NBD 10810~10825 / tgt iSCSI 3260）。
    - 客戶端直接執行原語級 `sanboot iscsi:${next-server}:::1:...` 或 `nbd://`，客戶端內核負擔極低，**Windows 11 VHDX 強制走此軌道**，保證原生讀寫與 0 RAM 耗損。
-2. **Engine B（NetLoop GRUB HTTP 206 循環掛載引導）**：
+3. **Engine B（NetLoop GRUB HTTP 206 循環掛載引導）**：
    - 伺服器端僅需標準 HTTP 206 Byte-Range 串流，零額外背景守護進程，伺服器負載接近零。
    - 客戶端 GRUB 利用 `loopback loop (http,server:26001)/disks/xxx.vhd.vtoy` 於客戶端記憶體掛載磁盤分區，直接抓取內核與 initramfs，**Linux 原生 ISO / VHD 預設走此軌道**。
-3. **WinPE ISO 原生 HTTP Range 接管（Engine B 延伸）**：
+4. **WinPE ISO 原生 HTTP Range 接管（Engine B 延伸）**：
    - 針對 WinPE ISO，GRUB2 EFI 缺乏主機板 BlockIO 鉤子會導致微軟 bootmgr 報 `0xc000000e` 死鎖；
    - 系統在選單中預設採用 iPXE HTTP Range 206 `sanboot` 接管 WinPE，實測直通進入 2048x2048 桌面。
 

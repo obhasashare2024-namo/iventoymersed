@@ -1,5 +1,6 @@
 mod config;
 mod image;
+mod nbd_server;
 mod server;
 mod storage;
 mod timefmt;

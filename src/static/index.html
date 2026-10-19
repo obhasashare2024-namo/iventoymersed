@@ -678,7 +678,10 @@
               </div>
               <div style="font-size: 11px; color: var(--text-muted); font-family: var(--mono);">${t.path}</div>
             </td>
-            <td><span style="font-family: var(--mono); color: var(--accent-cyan);">:${t.nbd_port}</span></td>
+            <td>
+              <span style="font-family: var(--mono); color: var(--accent-cyan);">:${t.nbd_port}</span>
+              ${t.backend === 'in-tree-rust-nbd' ? '<span style="display:block;font-size:9px;color:#10b981;font-weight:600;">⚡ In-Tree Rust</span>' : (t.backend ? '<span style="display:block;font-size:9px;color:var(--text-muted);">' + t.backend + '</span>' : '')}
+            </td>
             <td><span style="font-family: var(--mono);">${t.root_dev || "自动探测"}</span></td>
             <td>
               <span class="status-alive">
