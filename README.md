@@ -53,11 +53,28 @@ flowchart TD
 
 ## 📦 部署與執行 (Quick Start)
 
-### 啟動服務
+### 啟動服務 (Standalone CLI)
 ```bash
-# 單一二進制直接運行，監聽 26001 端口
-./iventoymersed --dir /mnt/disks/vdisks --port 26001
+# 單一二進制直接運行，監聽 16001 端口
+./iventoymersed --dir /srv/vtoy/iso --port 16001
 ```
+
+### 🐳 容器化部署 (Multi-Arch Docker with User-Space tgtd)
+
+`iventoymersed` 支援以單一容器封裝 **Pure Rust 伺服器 + 用戶態 iSCSI 目標管理程式 (tgtd)**，原生支援 **ARMv7**（嵌入式路由器 IPQ40xx/BCM 等）、**ARM64**（樹莓派/RK3588/伺服器）與 **x86_64**：
+
+```bash
+# 運行官方容器 (ARMv7 / ARM64 / x86_64 自動適配)
+docker run -d \
+  --name iventoymersed \
+  --restart unless-stopped \
+  --privileged \
+  --net host \
+  -v /path/to/isos:/srv/vtoy/iso:rw \
+  ghcr.io/obhasashare2024-namo/iventoymersed:latest --port 16001
+```
+
+*特點：容器內自動在背景啟動獨立 `tgtd` 守護進程，自動監聽 TCP 3260 端口，當掃描到 Windows 磁碟鏡像（.vhd/.vhdx/.img）時，即時動態註冊 LUN 並透過 iPXE 提供原生 iBFT 無盤啟動。*
 
 ### DHCP / TFTP 鏈接配置
 在網關 DHCP（如 dnsmasq / ISC DHCP）中配置：

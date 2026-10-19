@@ -49,6 +49,261 @@ const NBD_CMD_DISC: u16 = 2;
 const NBD_CMD_FLUSH: u16 = 3;
 const NBD_CMD_TRIM: u16 = 4;
 
+/// In-Tree Pure Rust Copy-On-Write (COW) Storage Driver
+/// Supports both Direct Raw storage and Split .diff Raw Sparse storage.
+pub struct CowStorage {
+    pub base_file: Arc<std::fs::File>,
+    pub diff_file: Option<Arc<std::fs::File>>,
+    pub diff_path: Option<String>,
+    pub idx_path: Option<String>,
+    pub export_size: u64,
+    pub block_size: u64,
+    pub bitmap: Option<Arc<std::sync::RwLock<Vec<u8>>>>,
+    pub is_read_only: bool,
+}
+
+impl CowStorage {
+    pub fn open_direct(path: &str) -> std::io::Result<(Self, bool)> {
+        let (file, is_read_only) = match OpenOptions::new().read(true).write(true).open(path) {
+            Ok(f) => (f, false),
+            Err(e) => {
+                eprintln!("[nbd] Read-write open failed for '{}': {}. Falling back to read-only.", path, e);
+                let ro_file = OpenOptions::new().read(true).open(path)?;
+                (ro_file, true)
+            }
+        };
+        let export_size = file.metadata()?.len();
+        Ok((Self {
+            base_file: Arc::new(file),
+            diff_file: None,
+            diff_path: None,
+            idx_path: None,
+            export_size,
+            block_size: 4096,
+            bitmap: None,
+            is_read_only,
+        }, is_read_only))
+    }
+
+    pub fn open_cow(base_path: &str, diff_path: &str) -> std::io::Result<Self> {
+        let base_file = OpenOptions::new().read(true).open(base_path)?;
+        let export_size = base_file.metadata()?.len();
+
+        let diff_file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(diff_path)?;
+
+        let cur_diff_len = diff_file.metadata()?.len();
+        if cur_diff_len < export_size {
+            diff_file.set_len(export_size)?;
+        }
+
+        let block_size = 4096u64; // 4 KB block size (standard page/FS block size)
+        let num_blocks = (export_size + block_size - 1) / block_size;
+        let bitmap_len = ((num_blocks + 7) / 8) as usize;
+
+        let idx_path = format!("{}.idx", diff_path);
+        let bitmap_vec = if let Ok(data) = std::fs::read(&idx_path) {
+            if data.len() == bitmap_len {
+                data
+            } else {
+                vec![0u8; bitmap_len]
+            }
+        } else {
+            vec![0u8; bitmap_len]
+        };
+
+        println!("[nbd:cow] Initialized CowStorage: Base='{}' ({} MB, RO), Diff='{}' (Raw Sparse, blocks={}, idx='{}')",
+                 base_path, export_size / (1024 * 1024), diff_path, num_blocks, idx_path);
+
+        Ok(Self {
+            base_file: Arc::new(base_file),
+            diff_file: Some(Arc::new(diff_file)),
+            diff_path: Some(diff_path.to_string()),
+            idx_path: Some(idx_path),
+            export_size,
+            block_size,
+            bitmap: Some(Arc::new(std::sync::RwLock::new(bitmap_vec))),
+            is_read_only: false,
+        })
+    }
+
+    pub fn read_at(&self, buf: &mut [u8], offset: u64) -> std::io::Result<()> {
+        if self.diff_file.is_none() {
+            return self.base_file.read_exact_at(buf, offset);
+        }
+
+        let diff_file = self.diff_file.as_ref().unwrap();
+        let bitmap_lock = self.bitmap.as_ref().unwrap().read().unwrap();
+        let block_size = self.block_size;
+        let start_block = offset / block_size;
+        let end_block = (offset + buf.len() as u64 + block_size - 1) / block_size;
+
+        let mut all_base = true;
+        let mut all_diff = true;
+        for b in start_block..end_block {
+            let byte_idx = (b / 8) as usize;
+            let bit_idx = (b % 8) as u8;
+            let written = if byte_idx < bitmap_lock.len() {
+                (bitmap_lock[byte_idx] & (1 << bit_idx)) != 0
+            } else {
+                false
+            };
+            if written {
+                all_base = false;
+            } else {
+                all_diff = false;
+            }
+        }
+
+        if all_base {
+            drop(bitmap_lock);
+            return self.base_file.read_exact_at(buf, offset);
+        }
+        if all_diff {
+            drop(bitmap_lock);
+            return diff_file.read_exact_at(buf, offset);
+        }
+
+        let mut cur_offset = offset;
+        let mut buf_idx = 0;
+        let total_len = buf.len();
+
+        while buf_idx < total_len {
+            let b = cur_offset / block_size;
+            let block_end = (b + 1) * block_size;
+            let chunk_len = ((block_end - cur_offset) as usize).min(total_len - buf_idx);
+
+            let byte_idx = (b / 8) as usize;
+            let bit_idx = (b % 8) as u8;
+            let written = if byte_idx < bitmap_lock.len() {
+                (bitmap_lock[byte_idx] & (1 << bit_idx)) != 0
+            } else {
+                false
+            };
+
+            let slice = &mut buf[buf_idx..buf_idx + chunk_len];
+            if written {
+                diff_file.read_exact_at(slice, cur_offset)?;
+            } else {
+                self.base_file.read_exact_at(slice, cur_offset)?;
+            }
+
+            cur_offset += chunk_len as u64;
+            buf_idx += chunk_len;
+        }
+
+        Ok(())
+    }
+
+    pub fn write_at(&self, data: &[u8], offset: u64) -> std::io::Result<()> {
+        if self.diff_file.is_none() {
+            if self.is_read_only {
+                return Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "Read-only export"));
+            }
+            return self.base_file.write_all_at(data, offset);
+        }
+
+        let diff_file = self.diff_file.as_ref().unwrap();
+        let block_size = self.block_size;
+        let mut cur_offset = offset;
+        let mut buf_idx = 0;
+        let total_len = data.len();
+
+        let mut bitmap_lock = self.bitmap.as_ref().unwrap().write().unwrap();
+
+        while buf_idx < total_len {
+            let b = cur_offset / block_size;
+            let block_start = b * block_size;
+            let block_end = block_start + block_size;
+            let chunk_len = ((block_end - cur_offset) as usize).min(total_len - buf_idx);
+            let chunk = &data[buf_idx..buf_idx + chunk_len];
+
+            let byte_idx = (b / 8) as usize;
+            let bit_idx = (b % 8) as u8;
+            let already_in_diff = if byte_idx < bitmap_lock.len() {
+                (bitmap_lock[byte_idx] & (1 << bit_idx)) != 0
+            } else {
+                false
+            };
+
+            if already_in_diff {
+                // Block already modified in diff layer: write chunk directly
+                diff_file.write_all_at(chunk, cur_offset)?;
+            } else if cur_offset == block_start && chunk_len == block_size as usize {
+                // Full block overwrite: write directly without reading base
+                diff_file.write_all_at(chunk, block_start)?;
+                if byte_idx < bitmap_lock.len() {
+                    bitmap_lock[byte_idx] |= 1 << bit_idx;
+                }
+            } else {
+                // Partial block on first modification: True Copy-On-Write
+                // Read base block, overlay chunk, and commit full block to diff file
+                let read_len = (self.export_size.saturating_sub(block_start) as usize).min(block_size as usize);
+                let mut full_block = vec![0u8; read_len];
+                let _ = self.base_file.read_exact_at(&mut full_block, block_start);
+                let rel_offset = (cur_offset - block_start) as usize;
+                full_block[rel_offset..rel_offset + chunk_len].copy_from_slice(chunk);
+                diff_file.write_all_at(&full_block, block_start)?;
+                if byte_idx < bitmap_lock.len() {
+                    bitmap_lock[byte_idx] |= 1 << bit_idx;
+                }
+            }
+
+            cur_offset += chunk_len as u64;
+            buf_idx += chunk_len;
+        }
+
+        Ok(())
+    }
+
+    pub fn trim(&self, offset: u64, length: u32) -> std::io::Result<()> {
+        if let Some(diff_file) = &self.diff_file {
+            let block_size = self.block_size;
+            let start_block = (offset + block_size - 1) / block_size;
+            let end_block = (offset + length as u64) / block_size;
+            if start_block < end_block {
+                let mut bitmap_lock = self.bitmap.as_ref().unwrap().write().unwrap();
+                for b in start_block..end_block {
+                    let byte_idx = (b / 8) as usize;
+                    let bit_idx = (b % 8) as u8;
+                    if byte_idx < bitmap_lock.len() {
+                        bitmap_lock[byte_idx] &= !(1 << bit_idx);
+                    }
+                }
+            }
+
+            #[cfg(target_os = "linux")]
+            {
+                use std::os::unix::io::AsRawFd;
+                let fd = diff_file.as_raw_fd();
+                let _ = unsafe {
+                    libc::fallocate(fd, 0x03, offset as libc::off_t, length as libc::off_t)
+                };
+            }
+        }
+        Ok(())
+    }
+
+    pub fn sync_data(&self) -> std::io::Result<()> {
+        if let Some(diff_file) = &self.diff_file {
+            diff_file.sync_data()?;
+            if let Some(idx_p) = &self.idx_path {
+                if let Some(bm) = &self.bitmap {
+                    let data = bm.read().unwrap().clone();
+                    let _ = std::fs::write(idx_p, &data);
+                }
+            }
+        } else {
+            self.base_file.sync_data()?;
+        }
+        Ok(())
+    }
+}
+
 #[allow(dead_code)]
 pub struct EmbeddedNbdServer {
     pub port: u16,
@@ -60,23 +315,28 @@ pub struct EmbeddedNbdServer {
 
 impl EmbeddedNbdServer {
     pub async fn start(port: u16, path: &str, export_name: &str) -> std::io::Result<Self> {
-        let (file, is_read_only) = match OpenOptions::new().read(true).write(true).open(path) {
-            Ok(f) => (f, false),
-            Err(e) => {
-                eprintln!("[nbd] Read-write open failed for '{}': {}. Falling back to read-only.", path, e);
-                let ro_file = OpenOptions::new().read(true).open(path)?;
-                (ro_file, true)
-            }
-        };
+        let (storage, is_read_only) = CowStorage::open_direct(path)?;
+        Self::start_with_storage(port, Arc::new(storage), path, export_name, is_read_only).await
+    }
 
-        let export_size = file.metadata()?.len();
-        let file_arc = Arc::new(file);
+    pub async fn start_cow(port: u16, base_path: &str, diff_path: &str, export_name: &str) -> std::io::Result<Self> {
+        let storage = CowStorage::open_cow(base_path, diff_path)?;
+        Self::start_with_storage(port, Arc::new(storage), base_path, export_name, false).await
+    }
 
+    async fn start_with_storage(
+        port: u16,
+        storage: Arc<CowStorage>,
+        path_str: &str,
+        export_name: &str,
+        is_read_only: bool,
+    ) -> std::io::Result<Self> {
+        let export_size = storage.export_size;
         let listener = TcpListener::bind(("0.0.0.0", port)).await?;
         let (shutdown_tx, mut shutdown_rx) = watch::channel(false);
 
         let srv_port = port;
-        let srv_path = path.to_string();
+        let srv_path = path_str.to_string();
         let srv_name = export_name.to_string();
         let srv_name_srv = srv_name.clone();
 
@@ -89,11 +349,10 @@ impl EmbeddedNbdServer {
                     accept_res = listener.accept() => {
                         match accept_res {
                             Ok((stream, peer_addr)) => {
-                                let f = file_arc.clone();
+                                let st = storage.clone();
                                 let exp_name = srv_name_srv.clone();
                                 tokio::spawn(async move {
-                                    if let Err(e) = handle_connection(stream, peer_addr, f, export_size, exp_name, is_read_only).await {
-                                        // Ignore normal disconnect EOFs
+                                    if let Err(e) = handle_connection(stream, peer_addr, st, export_size, exp_name, is_read_only).await {
                                         if e.kind() != std::io::ErrorKind::UnexpectedEof && e.kind() != std::io::ErrorKind::ConnectionReset {
                                             eprintln!("[nbd:client {}] Session error: {}", peer_addr, e);
                                         }
@@ -145,7 +404,7 @@ impl Drop for EmbeddedNbdServer {
 async fn handle_connection(
     mut stream: TcpStream,
     peer_addr: SocketAddr,
-    file: Arc<std::fs::File>,
+    storage: Arc<CowStorage>,
     export_size: u64,
     export_name: String,
     is_read_only: bool,
@@ -200,7 +459,7 @@ async fn handle_connection(
                 }
                 stream.flush().await?;
 
-                return run_transmission_loop(stream, peer_addr, file, export_size, is_read_only).await;
+                return run_transmission_loop(stream, peer_addr, storage, export_size, is_read_only).await;
             }
             NBD_OPT_ABORT => {
                 println!("[nbd:client {}] Client requested OPT_ABORT", peer_addr);
@@ -233,7 +492,7 @@ async fn handle_connection(
 
                 if opt_id == NBD_OPT_GO {
                     println!("[nbd:client {}] Handshake completed via OPT_GO", peer_addr);
-                    return run_transmission_loop(stream, peer_addr, file, export_size, is_read_only).await;
+                    return run_transmission_loop(stream, peer_addr, storage, export_size, is_read_only).await;
                 }
             }
             NBD_OPT_STRUCTURED_REPLY => {
@@ -265,7 +524,7 @@ async fn send_opt_reply<W: AsyncWriteExt + Unpin>(
 async fn run_transmission_loop(
     stream: TcpStream,
     peer_addr: SocketAddr,
-    file: Arc<std::fs::File>,
+    storage: Arc<CowStorage>,
     export_size: u64,
     is_read_only: bool,
 ) -> std::io::Result<()> {
@@ -299,11 +558,11 @@ async fn run_transmission_loop(
                     continue;
                 }
 
-                let f = file.clone();
+                let st = storage.clone();
                 let len = length as usize;
                 let read_res = tokio::task::spawn_blocking(move || {
                     let mut buf = vec![0u8; len];
-                    match f.read_exact_at(&mut buf, offset) {
+                    match st.read_at(&mut buf, offset) {
                         Ok(()) => Ok(buf),
                         Err(e) => Err(e),
                     }
@@ -335,12 +594,12 @@ async fn run_transmission_loop(
                     continue;
                 }
 
-                let f = file.clone();
+                let st = storage.clone();
                 let fua = (flags & 1) != 0;
                 let write_res = tokio::task::spawn_blocking(move || {
-                    let r = f.write_all_at(&data, offset);
+                    let r = st.write_at(&data, offset);
                     if r.is_ok() && fua {
-                        let _ = f.sync_data();
+                        let _ = st.sync_data();
                     }
                     r
                 })
@@ -360,8 +619,8 @@ async fn run_transmission_loop(
                 break;
             }
             NBD_CMD_FLUSH => {
-                let f = file.clone();
-                let sync_res = tokio::task::spawn_blocking(move || f.sync_data()).await;
+                let st = storage.clone();
+                let sync_res = tokio::task::spawn_blocking(move || st.sync_data()).await;
                 match sync_res {
                     Ok(Ok(())) => {
                         send_simple_reply(&mut writer, 0, handle).await?;
@@ -377,35 +636,14 @@ async fn run_transmission_loop(
                     continue;
                 }
 
-                let f = file.clone();
-                let trim_res = tokio::task::spawn_blocking(move || {
-                    #[cfg(target_os = "linux")]
-                    {
-                        use std::os::unix::io::AsRawFd;
-                        let fd = f.as_raw_fd();
-                        // FALLOC_FL_PUNCH_HOLE (0x02) | FALLOC_FL_KEEP_SIZE (0x01)
-                        let ret = unsafe {
-                            libc::fallocate(fd, 0x03, offset as libc::off_t, length as libc::off_t)
-                        };
-                        if ret == 0 {
-                            Ok(())
-                        } else {
-                            Err(std::io::Error::last_os_error())
-                        }
-                    }
-                    #[cfg(not(target_os = "linux"))]
-                    {
-                        Ok(())
-                    }
-                })
-                .await;
+                let st = storage.clone();
+                let trim_res = tokio::task::spawn_blocking(move || st.trim(offset, length)).await;
 
                 match trim_res {
                     Ok(Ok(())) => {
                         send_simple_reply(&mut writer, 0, handle).await?;
                     }
                     _ => {
-                        // Return OK on unsupported punch hole to maintain client transparency
                         send_simple_reply(&mut writer, 0, handle).await?;
                     }
                 }

@@ -21,6 +21,11 @@ fn print_usage() {
 #[tokio::main]
 async fn main() {
     let args: Vec<String> = std::env::args().collect();
+    if args.len() > 1 && args[1] == "nbd" {
+        run_standalone_nbd(&args[2..]).await;
+        return;
+    }
+
     let mut cfg_path = std::env::var("BRIDGE_CONFIG")
         .unwrap_or_else(|_| "/etc/iventoy-ipxe/config.yaml".to_string());
     let mut host_override: Option<String> = None;
@@ -125,3 +130,85 @@ async fn wait_for_signal() {
         _ = int.recv() => { println!("[*] Received SIGINT, shutting down Bridge..."); }
     }
 }
+
+async fn run_standalone_nbd(args: &[String]) {
+    let mut port: u16 = 9111;
+    let mut base_path = String::new();
+    let mut diff_path: Option<String> = None;
+    let mut export_name = "vtoy".to_string();
+
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--port" | "-p" => {
+                i += 1;
+                if i < args.len() {
+                    port = args[i].parse().unwrap_or(9111);
+                }
+            }
+            "--base" | "-b" => {
+                i += 1;
+                if i < args.len() {
+                    base_path = args[i].clone();
+                }
+            }
+            "--diff" | "-d" => {
+                i += 1;
+                if i < args.len() {
+                    diff_path = Some(args[i].clone());
+                }
+            }
+            "--export" | "-e" => {
+                i += 1;
+                if i < args.len() {
+                    export_name = args[i].clone();
+                }
+            }
+            "--help" | "-h" => {
+                println!("Usage: iventoymersed nbd --port <PORT> --base <PATH> [--diff <PATH>] [--export <NAME>]");
+                return;
+            }
+            other => {
+                eprintln!("[nbd] Unknown option: {}", other);
+                return;
+            }
+        }
+        i += 1;
+    }
+
+    if base_path.is_empty() {
+        eprintln!("[nbd] Error: --base <PATH> is required.");
+        return;
+    }
+
+    println!("[*] Starting iventoymersed In-Tree Pure Rust NBD Server (v{})", VERSION);
+    println!("    Port:        {}", port);
+    println!("    Export Name: {}", export_name);
+    println!("    Base (RO):   {}", base_path);
+    if let Some(ref d) = diff_path {
+        println!("    Diff (COW):  {} (Raw Sparse .diff)", d);
+    } else {
+        println!("    Mode:        Direct Read-Only / Read-Write");
+    }
+
+    let mut server = match diff_path {
+        Some(d) => match nbd_server::EmbeddedNbdServer::start_cow(port, &base_path, &d, &export_name).await {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("[ERR] Failed to start COW NBD server: {}", e);
+                std::process::exit(1);
+            }
+        },
+        None => match nbd_server::EmbeddedNbdServer::start(port, &base_path, &export_name).await {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("[ERR] Failed to start Direct NBD server: {}", e);
+                std::process::exit(1);
+            }
+        },
+    };
+
+    wait_for_signal().await;
+    server.shutdown();
+}
+

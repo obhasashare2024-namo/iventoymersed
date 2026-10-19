@@ -1,0 +1,16 @@
+FROM debian:bookworm-slim
+
+RUN echo 'nameserver 223.5.5.5' > /etc/resolv.conf \
+    && (sed -i 's/deb.debian.org/mirrors.ustc.edu.cn/g; s/security.debian.org/mirrors.ustc.edu.cn/g' /etc/apt/sources.list.d/debian.sources 2>/dev/null || sed -i 's/deb.debian.org/mirrors.ustc.edu.cn/g; s/security.debian.org/mirrors.ustc.edu.cn/g' /etc/apt/sources.list) \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends tgt ca-certificates procps kmod \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+COPY dist/iventoymersed /app/iventoymersed
+COPY docker/entrypoint.sh /app/entrypoint.sh
+RUN chmod +x /app/iventoymersed /app/entrypoint.sh
+
+EXPOSE 16000 16001 9111 3260
+
+ENTRYPOINT ["/app/entrypoint.sh"]

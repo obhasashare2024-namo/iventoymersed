@@ -209,13 +209,41 @@ impl StorageManager {
 
     async fn export_nbd(&self, port: u16, path: &str, fmt: DiskFormat) -> (Option<NbdBackend>, String) {
         if fmt == DiskFormat::Raw || fmt == DiskFormat::Iso {
-            log(&format!("Exporting via In-Tree Pure Rust NBD Server on port {}: Backing={}", port, path));
-            match crate::nbd_server::EmbeddedNbdServer::start(port, path, "vtoy").await {
-                Ok(srv) => (Some(NbdBackend::Embedded(srv)), "in-tree-rust-nbd".to_string()),
-                Err(e) => {
-                    eprintln!("[ERR] Failed to start In-Tree NBD server on port {}: {}. Falling back to qemu-nbd.", port, e);
-                    let c = self.export_qemu_nbd(port, path, fmt).await;
-                    (c.map(NbdBackend::External), "qemu-nbd".to_string())
+            let diff_opt = std::env::var("COW_DIR").ok().map(|dir| {
+                let p = std::path::Path::new(path);
+                let fname = p.file_name().and_then(|s| s.to_str()).unwrap_or("disk");
+                let clean_name = fname
+                    .replace(".img.vtoy", "")
+                    .replace(".vtoy", "")
+                    .replace(".img", "")
+                    .replace(".raw", "");
+                format!("{}/{}.diff", dir, clean_name)
+            });
+
+            if let Some(ref diff_path) = diff_opt {
+                log(&format!("Exporting via In-Tree Pure Rust NBD Server (COW .diff) on port {}: Backing={}, Diff={}", port, path, diff_path));
+                match crate::nbd_server::EmbeddedNbdServer::start_cow(port, path, diff_path, "vtoy").await {
+                    Ok(srv) => (Some(NbdBackend::Embedded(srv)), "in-tree-rust-nbd-cow".to_string()),
+                    Err(e) => {
+                        eprintln!("[ERR] Failed to start In-Tree NBD server with COW on port {}: {}. Falling back to direct raw.", port, e);
+                        match crate::nbd_server::EmbeddedNbdServer::start(port, path, "vtoy").await {
+                            Ok(srv) => (Some(NbdBackend::Embedded(srv)), "in-tree-rust-nbd".to_string()),
+                            Err(e2) => {
+                                eprintln!("[ERR] Direct start also failed: {}.", e2);
+                                (None, "failed".to_string())
+                            }
+                        }
+                    }
+                }
+            } else {
+                log(&format!("Exporting via In-Tree Pure Rust NBD Server on port {}: Backing={}", port, path));
+                match crate::nbd_server::EmbeddedNbdServer::start(port, path, "vtoy").await {
+                    Ok(srv) => (Some(NbdBackend::Embedded(srv)), "in-tree-rust-nbd".to_string()),
+                    Err(e) => {
+                        eprintln!("[ERR] Failed to start In-Tree NBD server on port {}: {}. Falling back to qemu-nbd.", port, e);
+                        let c = self.export_qemu_nbd(port, path, fmt).await;
+                        (c.map(NbdBackend::External), "qemu-nbd".to_string())
+                    }
                 }
             }
         } else {
@@ -599,6 +627,7 @@ impl StorageManager {
 
     /// Builds the top-level unified OS boot menu (eliminating dual-engine selector delay)
     pub async fn build_top_level_ipxe_menu(&self, _client_mac: Option<&str>) -> String {
+        let port = self.config.read().await.bridge_port;
         let snapshot = self.health_targets().await;
         let mut script = String::new();
         script.push_str("#!ipxe\n\n");
@@ -608,7 +637,8 @@ impl StorageManager {
         script.push_str("cpair --foreground 3 --background 0 2 ||\n\n");
 
         script.push_str("set menu-timeout 5000\n");
-        script.push_str("isset ${menu-default} || set menu-default iso_grub_UQi_USBsys_2023_btrfs_iso\n\n");
+        script.push_str("isset ${srv} || set srv 192.168.91.11\n");
+        script.push_str("isset ${menu-default} || set menu-default win_iscsi_win8_golden_img\n\n");
 
         script.push_str(":start\n");
         script.push_str("menu iventoymersed Unified OS Boot Menu\n\n");
@@ -621,42 +651,60 @@ impl StorageManager {
         for item in &snapshot {
             let safe_id = sanitize_ipxe_key(&item.id);
             let label = sanitize_ipxe_text(&item.file);
+            let iqn = sanitize_ipxe_text(&item.iqn);
 
             if item.is_windows {
-                let key = format!("win_{}", safe_id);
-                win_items.push(format!("item {} [WIN] {} (Scheme A: iSCSI/iBFT SANBOOT)", key, label));
-                let iqn = sanitize_ipxe_text(&item.iqn);
+                let key = format!("win_iscsi_{}", safe_id);
+                let key_http = format!("win_http_{}", safe_id);
+                win_items.push(format!("item {} [WIN-iSCSI] {} [Path 1: ARMv7 tgt iSCSI]", key, label));
+                win_items.push(format!("item {} [WIN-HTTP] {} [Path 2: HTTP Range SANBOOT]", key_http, label));
                 handlers.push(format!(
-                    ":{}\necho Booting {} via Scheme A (Native iSCSI/iBFT SANBOOT)...\nset root-path iscsi:${{next-server}}:::1:{}\nsanboot iscsi:${{next-server}}:::1:{} || goto boot_failed\n",
+                    ":{}\necho Booting {} via Path 1 (Native iSCSI/iBFT SANBOOT)...\nset root-path iscsi:${{srv}}:::1:{}\nsanboot iscsi:${{srv}}:::1:{} || goto boot_failed\n",
                     key, label, iqn, iqn
                 ));
+                handlers.push(format!(
+                    ":{}\necho Booting {} via Path 2 (HTTP Range SANBOOT)...\nsanboot http://${{srv}}:{}/iso/{} || goto boot_failed\n",
+                    key_http, label, port, item.file
+                ));
             } else if item.file.to_ascii_lowercase().ends_with(".iso") {
-                let key_a = format!("iso_{}", safe_id);
+                let key_a = format!("iso_http_{}", safe_id);
+                let key_iscsi = format!("iso_iscsi_{}", safe_id);
                 let key_b = format!("iso_grub_{}", safe_id);
-                iso_items.push(format!("item {} [ISO] {} (Scheme A: HTTP Range SANBOOT)", key_a, label));
-                iso_items.push(format!("item {} [ISO] {} [Scheme B: NetLoop GRUB]", key_b, label));
+                iso_items.push(format!("item {} [ISO-iSCSI] {} [Path 1: ARMv7 tgt iSCSI]", key_iscsi, label));
+                iso_items.push(format!("item {} [ISO-HTTP] {} [Path 2: HTTP Range SANBOOT]", key_a, label));
+                iso_items.push(format!("item {} [ISO-GRUB] {} [Scheme B: NetLoop GRUB]", key_b, label));
 
                 handlers.push(format!(
-                    ":{}\necho Booting {} via Scheme A (iPXE HTTP Range SANBOOT)...\nsanboot http://${{next-server}}:26001/iso/{} || goto boot_failed\n",
-                    key_a, label, item.file
+                    ":{}\necho Booting {} via Path 1 (ARMv7 tgt iSCSI Target)...\nset root-path iscsi:${{srv}}:::1:{}\nsanboot iscsi:${{srv}}:::1:{} || goto boot_failed\n",
+                    key_iscsi, label, iqn, iqn
                 ));
                 handlers.push(format!(
-                    ":{}\necho Handing off {} to Scheme B (NetLoop GRUB Subsystem)...\niseq ${{platform}} efi && chain http://${{next-server}}:26001/grub/grubnet.efi || chain http://${{next-server}}:26001/grub/core.0 || goto boot_failed\n",
-                    key_b, label
+                    ":{}\necho Booting {} via Path 2 (iPXE HTTP Range SANBOOT)...\nsanboot http://${{srv}}:{}/iso/{} || goto boot_failed\n",
+                    key_a, label, port, item.file
+                ));
+                handlers.push(format!(
+                    ":{}\necho Handing off {} to Scheme B (NetLoop GRUB Subsystem)...\niseq ${{platform}} efi && chain http://${{srv}}:{}/grub/grubnet.efi || chain http://${{srv}}:{}/grub/core.0 || goto boot_failed\n",
+                    key_b, label, port, port
                 ));
             } else {
                 let key_b = format!("vdisk_{}", safe_id);
                 let key_a = format!("vdisk_nbd_{}", safe_id);
+                let key_iscsi = format!("vdisk_iscsi_{}", safe_id);
                 linux_items.push(format!("item {} [{}] {} (Default: Scheme B NetLoop GRUB)", key_b, item.format.to_uppercase(), label));
                 linux_items.push(format!("item {} [{}] {} [Scheme A: iVentoy NBD Hook]", key_a, item.format.to_uppercase(), label));
+                linux_items.push(format!("item {} [{}] {} [Scheme A: ARMv7 tgt iSCSI]", key_iscsi, item.format.to_uppercase(), label));
 
                 handlers.push(format!(
-                    ":{}\necho Handing off {} to Scheme B (NetLoop GRUB Subsystem)...\niseq ${{platform}} efi && chain http://${{next-server}}:26001/grub/grubnet.efi || chain http://${{next-server}}:26001/grub/core.0 || goto boot_failed\n",
-                    key_b, label
+                    ":{}\necho Handing off {} to Scheme B (NetLoop GRUB Subsystem)...\niseq ${{platform}} efi && chain http://${{srv}}:{}/grub/grubnet.efi || chain http://${{srv}}:{}/grub/core.0 || goto boot_failed\n",
+                    key_b, label, port, port
                 ));
                 handlers.push(format!(
-                    ":{}\necho Booting {} via Scheme A (iVentoy NBD Hook, Port {})...\nkernel http://${{next-server}}:26001/vtoy/vmlinuz initrd=initramfs.img console=ttyS0 console=tty0 ip=dhcp nbdroot=${{next-server}} nbdport={} nbdmaxpart=16 root={} rw nosplash verbose\ninitrd http://${{next-server}}:26001/vtoy/initramfs.img\nboot || goto boot_failed\n",
-                    key_a, label, item.nbd_port, item.nbd_port, item.root_dev
+                    ":{}\necho Booting {} via Scheme A (iVentoy NBD Hook, Port {})...\nkernel http://${{srv}}:{}/vtoy/vmlinuz initrd=initramfs.img console=ttyS0 console=tty0 ip=dhcp nbdroot=${{srv}} nbdport={} nbdmaxpart=16 root={} rw nosplash verbose\ninitrd http://${{srv}}:{}/vtoy/initramfs.img\nboot || goto boot_failed\n",
+                    key_a, label, item.nbd_port, port, item.nbd_port, item.root_dev, port
+                ));
+                handlers.push(format!(
+                    ":{}\necho Booting {} via Scheme A (ARMv7 tgt iSCSI Target)...\nset root-path iscsi:${{srv}}:::1:{}\nsanboot iscsi:${{srv}}:::1:{} || goto boot_failed\n",
+                    key_iscsi, label, iqn, iqn
                 ));
             }
         }
@@ -703,6 +751,7 @@ impl StorageManager {
 
     /// Builds dynamic GRUB configuration for Engine B (Pure NetLoop HTTP 206)
     pub async fn build_netloop_grub_cfg(&self) -> String {
+        let port = self.config.read().await.bridge_port;
         let snapshot = self.health_targets().await;
         let mut cfg = String::new();
         cfg.push_str("set timeout=5\n");
@@ -713,33 +762,33 @@ impl StorageManager {
         for item in snapshot {
             if item.file.contains("2023_btrfs") {
                 cfg.push_str(&format!(
-                    "menuentry \">> [NetLoop WinPE CPIO Wimboot] {} <<\" --id winpe_cpio {{\n    insmod http\n    insmod linux\n    echo \"[1/3] Loading wimboot binary...\"\n    linux (http,${{net_default_server}}:26001)/iso/wimboot.x86_64\n    echo \"[2/3] Loading WinPE pre-packed CPIO RAMDisk (131MB)...\"\n    initrd (http,${{net_default_server}}:26001)/iso/winpe_test.cpio\n    echo \"[3/3] Executing wimboot and launching WinPE...\"\n    boot\n}}\n\nmenuentry \">> [NetLoop WinPE Direct EFI] {} <<\" --id winpe_direct {{\n    insmod http\n    insmod loopback\n    insmod iso9660\n    insmod chain\n    echo \"[1/2] Establishing HTTP 206 Loopback to {}...\"\n    loopback loop (http,${{net_default_server}}:26001)/iso/{}\n    echo \"[2/2] Chainloading EFI bootloader from loopback...\"\n    chainloader (loop)/efi/boot/bootx64.efi\n    boot\n}}\n\n",
-                    item.file, item.file, item.file, item.file
+                    "menuentry \">> [NetLoop WinPE CPIO Wimboot] {} <<\" --id winpe_cpio {{\n    insmod http\n    insmod linux\n    echo \"[1/3] Loading wimboot binary...\"\n    linux (http,${{net_default_server}}:{})/iso/wimboot.x86_64\n    echo \"[2/3] Loading WinPE pre-packed CPIO RAMDisk (131MB)...\"\n    initrd (http,${{net_default_server}}:{})/iso/winpe_test.cpio\n    echo \"[3/3] Executing wimboot and launching WinPE...\"\n    boot\n}}\n\nmenuentry \">> [NetLoop WinPE Direct EFI] {} <<\" --id winpe_direct {{\n    insmod http\n    insmod loopback\n    insmod iso9660\n    insmod chain\n    echo \"[1/2] Establishing HTTP 206 Loopback to {}...\"\n    loopback loop (http,${{net_default_server}}:{})/iso/{}\n    echo \"[2/2] Chainloading EFI bootloader from loopback...\"\n    chainloader (loop)/efi/boot/bootx64.efi\n    boot\n}}\n\n",
+                    item.file, port, port, item.file, item.file, port, item.file
                 ));
             } else if item.file.ends_with(".iso") {
                 cfg.push_str(&format!(
-                    "menuentry \">> [NetLoop ISO] {} <<\" {{\n    insmod http\n    insmod loopback\n    insmod iso9660\n    loopback loop (http,${{net_default_server}}:26001)/iso/{}\n    boot\n}}\n\n",
-                    item.file, item.file
+                    "menuentry \">> [NetLoop ISO] {} <<\" {{\n    insmod http\n    insmod loopback\n    insmod iso9660\n    loopback loop (http,${{net_default_server}}:{})/iso/{}\n    boot\n}}\n\n",
+                    item.file, port, item.file
                 ));
             } else if item.file.contains("COS") {
                 cfg.push_str(&format!(
-                    "menuentry \">> [Pure NetLoop] CachyOS 142GB Ext4 ({}) <<\" --id cachyos {{\n    insmod http\n    insmod loopback\n    insmod part_gpt\n    insmod ext2\n    insmod linux\n    echo \"[1/4] Establishing HTTP 206 Loopback to {}...\"\n    loopback loop (http,${{net_default_server}}:26001)/iso/{}\n    echo \"[2/4] Parsing internal GPT table and extracting CachyOS kernel...\"\n    linux (loop,gpt2)/boot/vmlinuz-linux-cachyos console=tty0 console=ttyS0,115200 ip=dhcp nbdroot=${{net_default_server}} nbdport={} nbdmaxpart=16 root=/dev/nbd0p2 rw nosplash verbose\n    echo \"[3/4] Extracting CachyOS native initramfs from loopback block device...\"\n    initrd (loop,gpt2)/boot/initramfs-linux-cachyos.img\n    echo \"[4/4] Executing kernel and launching CachyOS...\"\n    boot\n}}\n\n",
-                    item.file, item.file, item.file, item.nbd_port
+                    "menuentry \">> [Pure NetLoop] CachyOS 142GB Ext4 ({}) <<\" --id cachyos {{\n    insmod http\n    insmod loopback\n    insmod part_gpt\n    insmod ext2\n    insmod linux\n    echo \"[1/4] Establishing HTTP 206 Loopback to {}...\"\n    loopback loop (http,${{net_default_server}}:{})/iso/{}\n    echo \"[2/4] Parsing internal GPT table and extracting CachyOS kernel...\"\n    linux (loop,gpt2)/boot/vmlinuz-linux-cachyos console=tty0 console=ttyS0,115200 ip=dhcp nbdroot=${{net_default_server}} nbdport={} nbdmaxpart=16 root=/dev/nbd0p2 rw nosplash verbose\n    echo \"[3/4] Extracting CachyOS native initramfs from loopback block device...\"\n    initrd (loop,gpt2)/boot/initramfs-linux-cachyos.img\n    echo \"[4/4] Executing kernel and launching CachyOS...\"\n    boot\n}}\n\n",
+                    item.file, item.file, port, item.file, item.nbd_port
                 ));
             } else if item.file.contains("anitix") {
                 cfg.push_str(&format!(
-                    "menuentry \">> [Pure NetLoop] antiX Linux 8GB Btrfs ({}) <<\" --id antix {{\n    insmod http\n    insmod loopback\n    insmod part_gpt\n    insmod btrfs\n    insmod linux\n    echo \"[1/4] Establishing HTTP 206 Loopback to {}...\"\n    loopback loop (http,${{net_default_server}}:26001)/iso/{}\n    echo \"[2/4] Parsing GPT and extracting antiX native kernel...\"\n    linux (loop,gpt3)/boot/vmlinuz-6.6.119-antix.1-amd64-smp console=tty0 console=ttyS0,115200 ip=dhcp nbdroot=${{net_default_server}} nbdport={} nbdmaxpart=16 root=/dev/nbd0p3 rw nosplash verbose\n    echo \"[3/4] Extracting antiX native initramfs from loopback block device...\"\n    initrd (loop,gpt3)/boot/initrd.img-6.6.119-antix.1-amd64-smp\n    echo \"[4/4] Executing kernel and launching antiX Full Desktop...\"\n    boot\n}}\n\n",
-                    item.file, item.file, item.file, item.nbd_port
+                    "menuentry \">> [Pure NetLoop] antiX Linux 8GB Btrfs ({}) <<\" --id antix {{\n    insmod http\n    insmod loopback\n    insmod part_gpt\n    insmod btrfs\n    insmod linux\n    echo \"[1/4] Establishing HTTP 206 Loopback to {}...\"\n    loopback loop (http,${{net_default_server}}:{})/iso/{}\n    echo \"[2/4] Parsing GPT and extracting antiX native kernel...\"\n    linux (loop,gpt3)/boot/vmlinuz-6.6.119-antix.1-amd64-smp console=tty0 console=ttyS0,115200 ip=dhcp nbdroot=${{net_default_server}} nbdport={} nbdmaxpart=16 root=/dev/nbd0p3 rw nosplash verbose\n    echo \"[3/4] Extracting antiX native initramfs from loopback block device...\"\n    initrd (loop,gpt3)/boot/initrd.img-6.6.119-antix.1-amd64-smp\n    echo \"[4/4] Executing kernel and launching antiX Full Desktop...\"\n    boot\n}}\n\n",
+                    item.file, item.file, port, item.file, item.nbd_port
                 ));
             } else if item.is_windows {
                 cfg.push_str(&format!(
-                    "menuentry \">> [NetLoop Win] {} (Handoff to iSCSI/iBFT SANBOOT) <<\" {{\n    echo \"[NetLoop] Windows VHDX requires native iSCSI/iBFT block driver...\"\n    echo \"[NetLoop] Delegating to iPXE iBFT subsystem...\"\n    chainloader (http,${{net_default_server}}:26001)/iso/test_win11.ipxe\n    boot\n}}\n\n",
-                    item.file
+                    "menuentry \">> [NetLoop Win] {} (Handoff to iSCSI/iBFT SANBOOT) <<\" {{\n    echo \"[NetLoop] Windows VHDX requires native iSCSI/iBFT block driver...\"\n    echo \"[NetLoop] Delegating to iPXE iBFT subsystem...\"\n    chainloader (http,${{net_default_server}}:{})/iso/test_win11.ipxe\n    boot\n}}\n\n",
+                    item.file, port
                 ));
             } else {
                 cfg.push_str(&format!(
-                    "menuentry \">> [NetLoop VDisk] {} (Port {}) <<\" {{\n    insmod http\n    insmod loopback\n    insmod part_gpt\n    loopback loop (http,${{net_default_server}}:26001)/iso/{}\n    boot\n}}\n\n",
-                    item.file, item.nbd_port, item.file
+                    "menuentry \">> [NetLoop VDisk] {} (Port {}) <<\" {{\n    insmod http\n    insmod loopback\n    insmod part_gpt\n    loopback loop (http,${{net_default_server}}:{})/iso/{}\n    boot\n}}\n\n",
+                    item.file, item.nbd_port, port, item.file
                 ));
             }
         }
