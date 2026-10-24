@@ -7,6 +7,7 @@ pub enum DiskFormat {
     Vpc, // VHD
     Vhdx,
     Vmdk,
+    Vdi,
     Iso,
 }
 
@@ -18,6 +19,7 @@ impl DiskFormat {
             DiskFormat::Vpc => "vpc",
             DiskFormat::Vhdx => "vhdx",
             DiskFormat::Vmdk => "vmdk",
+            DiskFormat::Vdi => "vdi",
             DiskFormat::Iso => "raw",
         }
     }
@@ -45,6 +47,9 @@ pub async fn detect_disk_format(image_path: &str) -> DiskFormat {
     }
     if n >= 4 && &header[0..4] == b"KDMV" {
         return DiskFormat::Vmdk;
+    }
+    if n >= 68 && &header[64..68] == &[0x7f, 0x10, 0xda, 0xbe] {
+        return DiskFormat::Vdi;
     }
 
     // Check VHD footer if header is raw (legacy VHD has 512-byte footer at end of file)
@@ -81,6 +86,8 @@ fn fallback_by_extension(image_path: &str) -> DiskFormat {
         DiskFormat::Vhdx
     } else if lower.ends_with(".vmdk") {
         DiskFormat::Vmdk
+    } else if lower.ends_with(".vdi") {
+        DiskFormat::Vdi
     } else if lower.ends_with(".iso") {
         DiskFormat::Iso
     } else {

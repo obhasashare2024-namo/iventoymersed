@@ -380,13 +380,13 @@ fn run_nbd_client(args: &[String]) {
     const NBD_CLEAR_SOCK: libc::c_int = 0xab04;
 
     unsafe {
-        libc::ioctl(nbd_fd, NBD_CLEAR_SOCK, 0);
-        libc::ioctl(nbd_fd, NBD_SET_SOCK, sock_fd);
-        libc::ioctl(nbd_fd, NBD_SET_BLKSIZE, 512);
-        libc::ioctl(nbd_fd, NBD_SET_SIZE_BLOCKS, export_size / 512);
+        libc::ioctl(nbd_fd, NBD_CLEAR_SOCK as _, 0);
+        libc::ioctl(nbd_fd, NBD_SET_SOCK as _, sock_fd);
+        libc::ioctl(nbd_fd, NBD_SET_BLKSIZE as _, 512);
+        libc::ioctl(nbd_fd, NBD_SET_SIZE_BLOCKS as _, export_size / 512);
         println!("[nbd-client] Entered kernel driver loop for {}!", dev_path);
-        libc::ioctl(nbd_fd, NBD_DO_IT);
-        libc::ioctl(nbd_fd, NBD_CLEAR_SOCK, 0);
+        libc::ioctl(nbd_fd, NBD_DO_IT as _);
+        libc::ioctl(nbd_fd, NBD_CLEAR_SOCK as _, 0);
     }
     println!("[nbd-client] Disconnected from {}.", dev_path);
 }

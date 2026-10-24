@@ -14,27 +14,29 @@
 ## 目录 / Table of Contents / 目次
 
 - [🇹🇼 繁體中文說明 (Default Traditional Chinese)](#-繁體中文說明-default-traditional-chinese)
-  - [🚀 v3.3.0 重大突破與核心特色](#-v330-重大突破與核心特色)
+  - [🚀 v3.5.0 重大突破與核心特色](#-v350-重大突破與核心特色)
   - [💎 核心特性深入解析](#-核心特性深入解析)
-    - [1. 純 Rust 內建動態 VHDX 引擎 (Pure Rust In-Tree Dynamic VHDX Engine)](#1-純-rust-內建動態-vhdx-引擎-pure-rust-in-tree-dynamic-vhdx-engine)
+    - [1. 純 Rust 內建全格式虛擬磁盤與 COW 引擎 (Raw, VHD, VHDX, VMDK, VDI, QCOW2)](#1-純-rust-內建全格式虛擬磁盤與-cow-引擎-raw-vhd-vhdx-vmdk-vdi-qcow2)
     - [2. 純 Rust 原生 GPT 審計與 BCD Hive 二進制動態重寫 (In-Tree GPT & BCD Auto-Patcher)](#2-純-rust-原生-gpt-審計與-bcd-hive-二進制動態重寫-in-tree-gpt--bcd-auto-patcher)
     - [3. Linux 模式 2「多重 Initrd 動態疊加（Multiple Initrd Dynamic Overlay）」零侵入無盤](#3-linux-模式-2多重-initrd-動態疊加multiple-initrd-dynamic-overlay零侵入無盤)
-    - [4. 模式 2（NetLoop GRUB HTTP 206 Loopback）超大檔案穩定支援](#4-模式-2netloop-grub-http-206-loopback超大檔案穩定支援)
+    - [4. 多操作系統實測驗收矩陣 (antiX Linux / OpenBSD / OpenWrt / Win11)](#4-多操作系統實測驗收矩陣-antix-linux--openbsd--openwrt--win11)
     - [5. 輕量級 NAS 與嵌入式路由器專屬優化 (OpenWrt / TrueNAS / CasaOS)](#5-輕量級-nas-與嵌入式路由器專屬優化-openwrt--truenas--casaos)
   - [🔀 雙引擎智慧路由架構 (Dual-Engine Smart Routing)](#-雙引擎智慧路由架構-dual-engine-smart-routing)
   - [📊 引擎方案對比速查表](#-引擎方案對比速查表)
   - [📦 快速部署指南 (Quick Start)](#-快速部署指南-quick-start)
   - [🛠️ 輕量 NAS 與 OpenWrt 部署實踐](#️-輕量-nas-與-openwrt-部署實踐)
 - [🇺🇸 English Documentation](#-english-documentation)
-  - [Overview & v3.3.0 Breakthroughs](#overview--v330-breakthroughs)
+  - [Overview & v3.5.0 Breakthroughs](#overview--v350-breakthroughs)
   - [Architecture & Key Highlights](#architecture--key-highlights)
+  - [Pure Rust Multi-Format Virtual Disk Engine](#pure-rust-multi-format-virtual-disk-engine)
   - [Pure Rust In-Tree GPT & BCD Engine](#pure-rust-in-tree-gpt--bcd-engine)
   - [Multiple Initrd Dynamic Overlay for Linux](#multiple-initrd-dynamic-overlay-for-linux)
   - [Lightweight NAS & OpenWrt Edge Deployment](#lightweight-nas--openwrt-edge-deployment)
   - [Quick Start](#quick-start)
 - [🇯🇵 日本語ドキュメント](#-日本語ドキュメント)
-  - [概要および v3.3.0 の主要な進化点](#概要および-v330-の主要な進化点)
+  - [概要および v3.5.0 の主要な進化点](#概要および-v350-の主要な進化点)
   - [アーキテクチャと主な特徴](#アーキテクチャと主な特徴)
+  - [Pure Rust 組み込み全仮想ディスク対応 (Raw, VHD, VHDX, VMDK, VDI, QCOW2)](#pure-rust-組み込み全仮想ディスク対応-raw-vhd-vhdx-vmdk-vdi-qcow2)
   - [Pure Rust 組み込み GPT / BCD 自動注入](#pure-rust-組み込み-gpt--bcd-自動注入)
   - [Linux 複数 Initrd 動的オーバーレイ（ゼロ侵入ディスクレス）](#linux-複数-initrd-動的オーバーレイゼロ侵入ディスクレス)
   - [軽量 NAS および OpenWrt への導入](#軽量-nas-および-openwrt-への導入)
@@ -45,31 +47,31 @@
 
 ## 🇹🇼 繁體中文說明 (Default Traditional Chinese)
 
-### 🚀 v3.3.0 重大突破與核心特色
+### 🚀 v3.5.0 重大突破與核心特色
 
-`iventoymersed` 是專為現代無盤網絡啟動、虛擬化維護與邊緣儲存打造的**純 Rust 雙軌融合網絡引導伺服器**。在最新發布的 **v3.3.0** 中，我們實現了四大深水區重大突破：
+`iventoymersed` 是專為現代無盤網絡啟動、虛擬化維護與邊緣儲存打造的**純 Rust 雙軌融合網絡引導伺服器**。在最新發布的 **v3.5.0** 中，我們實現了全格式虛擬化與多 OS 實體跑通的歷史性飛躍：
 
-1. **純 Rust 內建動態 VHDX 解析與 COW 差分引擎**：
-   - 徹底終結對宿主機 `qemu-nbd`、`kpartx`、`dmsetup` 等龐大外部工具的依賴；
-   - 內建微軟 VHDX 規範二進制解碼器，記憶體動態映射 BAT（區塊分配表），記憶體佔用極低（75GB VHDX 僅需 ~296KB RAM）；
-   - 原生支援 COW（寫時複製）差分層（`.diff`），完美保護只讀母盤，客戶端重啟即秒級還原；
-   - 完美適配 32 位元 ARMv7 指令集，全 64 位元整數運算防止扇區定址溢位，實測 Windows 11 25H2 實機與 QEMU 雙向跑通桌面，OCR 驗收 100% 通過。
-2. **純 Rust 內建 GPT 分區審計與 BCD Hive 二進制動態重寫引擎**：
+1. **純 Rust 內建全格式虛擬磁盤解析與 COW 差分引擎**：
+   - 徹底終結對宿主機 `qemu-nbd`、`kpartx`、`dmsetup` 等外部重型工具的依賴；
+   - 原生支援 **Raw / ISO、Fixed VHD、Dynamic VHD (VPC)、Dynamic VHDX、VMware VMDK (monolithicSparse)、VirtualBox VDI (dynamic) 以及 QEMU QCOW2 (v2/v3)**；
+   - 所有格式均無縫接入內建的 `CowStorage` 寫時複製層，母盤物理唯讀不可篡改，客戶端重啟即秒級還原；
+   - 完美適配 32 位元 ARMv7 指令集與 64 位元 x86/ARM，防止扇區定址溢位。
+2. **多操作系統矩陣實測跑通 (Multi-OS Boot Verification Matrix)**：
+   - **antiX Linux (Desktop)**：經 VMDK 格式引導跑通 IceWM 桌面，`verify-desktop-ocr` 驗收 100% 通過；
+   - **OpenBSD 7.7 (BSD Minimal)**：經 5.6MB 稀疏 img、QCOW2 與 Dynamic VHD 順利加載內存盤根分區 `rd0a` 並進入安裝控制台；
+   - **OpenWrt 23.05 (Appliance)**：經 QCOW2 格式秒級完成內核解包，`procd` 初始化成功，`br-lan` 網絡就緒；
+   - **Windows 8 / 10 / 11 (Desktop & PE)**：純 Rust GPT/BCD 引擎動態重寫 16 位元組 Disk/Partition GUID，實現零侵入無盤秒啟。
+3. **純 Rust 內建 GPT 分區審計與 BCD Hive 二進制動態重寫引擎**：
    - 徹底移除對外部 Python 腳本、`7z`、`sgdisk` 的依賴，倉庫 100% 純 Rust 化；
    - 原生二進制解析 GPT 標頭（LBA 1, `EFI PART`）與分區表（LBA 2），毫秒級識別 ESP 分區是否存在，並精確提取 Disk GUID 與目標 Windows 分區 Unique GUID；
    - 內嵌微軟 BCD 註冊表 Hive 二進制替換邏輯，自動重寫 16 位元組混合序 GUID（5 處 Disk + 5 處 Partition 精準替換）；
    - 提供純 Rust CLI 命令 (`iventoymersed inspect` / `iventoymersed patch-bcd`) 以及動態 HTTP API (`GET /vtoy/bcd?image=<target>`)。
-3. **Linux 模式 2「多重 Initrd 動態疊加（Multiple Initrd Dynamic Overlay）」無盤零侵入啟動技術**：
+4. **Linux 模式 2「多重 Initrd 動態疊加（Multiple Initrd Dynamic Overlay）」無盤零侵入啟動技術**：
    - 徹底解決 Linux 母盤原生無盤開機頑疾：母盤徹底免跑 `vtoyboot.sh`，100% 保持原生母盤只讀與乾淨；
    - 巧妙利用 Linux 內核與現代 GRUB2 的「多重 Initrd（Multiple Initrd）」記憶體解包覆蓋特性；
    - `initrd (loop,gpt2)/boot/initramfs-linux.img (http,${srv}:26001)/vtoy/vtoy_overlay.cpio`：開機瞬間由伺服器單程序動態載入輕量級通用網絡鉤子，支援 `initramfs-tools`、`dracut` 與 `mkinitcpio` 三大體系。
-4. **模式 2（NetLoop GRUB HTTP 206 Loopback）超大檔案穩定性加固**：
-   - 實測完美支援 **142GB COS (CachyOS) / 75GB Win11 VHDX / 60GB Artix / 8GB antiX** 巨型虛擬磁盤；
-   - HTTP 206 Byte-Range 核心修復：全面適配大小寫無關的 HTTP Header（修復 GRUB HTTP 模組在小寫 `content-range` / `content-length` 下的崩潰解析問題）；
-   - Fixed VHD 自動識別與 512B Conectix 尾部自動剔除，徹底規避 GPT/MBR 分區表因扇區偏移錯位而損壞的頑疾；
-   - 伺服器端純無狀態（Stateless），零 NBD/iSCSI 長連線負擔，局域網實測隨機讀取吞吐達 186 MB/s。
 5. **全平台輕量 NAS 與開源路由器開箱即用支援**：
-   - 靜態編譯 Musl 二進制（體積僅 1.7MB ~ 1.9MB），零 glibc 依賴；
+   - 靜態編譯 Musl 二進制（體積僅 1.7MB ~ 2.0MB），零 glibc 依賴；
    - 完美運行於 **OpenWrt (op)**、極路由 X（Gee K2P/HC5961 / Cortex-A7）、**TrueNAS**、**CasaOS**、**Unraid**、群暉/威聯通/綠聯/極空間等邊緣硬體；
    - 運行時 RSS 記憶體佔用 < 15MB，真正實現「15 元路由器 / 舊電視盒子秒變企業級無盤 PXE 伺服器」。
 

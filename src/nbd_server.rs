@@ -187,8 +187,228 @@ pub fn parse_vhdx_metadata(file: &std::fs::File) -> std::io::Result<Option<VhdxM
     }))
 }
 
+#[derive(Clone, Debug)]
+pub struct VmdkMeta {
+    pub capacity: u64,
+    pub grain_size: u64,
+    pub num_gtes: u32,
+    pub gd_offset: u64,
+    pub gd: Arc<Vec<u32>>,
+}
+
+pub fn parse_vmdk_metadata(file: &std::fs::File) -> std::io::Result<Option<VmdkMeta>> {
+    use std::os::unix::fs::FileExt;
+    let mut hdr = [0u8; 512];
+    if file.read_exact_at(&mut hdr, 0).is_err() {
+        return Ok(None);
+    }
+    if &hdr[0..4] != b"KDMV" {
+        return Ok(None);
+    }
+    let cap_sectors = u64::from_le_bytes(hdr[12..20].try_into().unwrap());
+    let grain_size_sectors = u64::from_le_bytes(hdr[20..28].try_into().unwrap());
+    let num_gtes = u32::from_le_bytes(hdr[44..48].try_into().unwrap());
+    let gd_offset_sectors = u64::from_le_bytes(hdr[56..64].try_into().unwrap());
+
+    if grain_size_sectors == 0 || num_gtes == 0 {
+        return Ok(None);
+    }
+
+    let grain_bytes = grain_size_sectors * 512;
+    let gt_coverage = grain_bytes * (num_gtes as u64);
+    let num_gt = (cap_sectors * 512 + gt_coverage - 1) / gt_coverage;
+
+    let mut gd_bytes = vec![0u8; (num_gt * 4) as usize];
+    file.read_exact_at(&mut gd_bytes, gd_offset_sectors * 512)?;
+    let mut gd = Vec::with_capacity(num_gt as usize);
+    for chunk in gd_bytes.chunks_exact(4) {
+        gd.push(u32::from_le_bytes(chunk.try_into().unwrap()));
+    }
+
+    println!("[nbd:vmdk] In-Tree Pure Rust loaded VMDK (monolithicSparse): Capacity={} MB, GrainSize={} KB, NumGTEs={}, GD entries={}",
+             (cap_sectors * 512) / (1024 * 1024), grain_bytes / 1024, num_gtes, gd.len());
+
+    Ok(Some(VmdkMeta {
+        capacity: cap_sectors * 512,
+        grain_size: grain_bytes,
+        num_gtes,
+        gd_offset: gd_offset_sectors * 512,
+        gd: Arc::new(gd),
+    }))
+}
+
+#[derive(Clone, Debug)]
+pub struct VdiMeta {
+    pub disk_size: u64,
+    pub block_size: u64,
+    pub off_data: u64,
+    pub bat: Arc<Vec<u32>>,
+}
+
+pub fn parse_vdi_metadata(file: &std::fs::File) -> std::io::Result<Option<VdiMeta>> {
+    use std::os::unix::fs::FileExt;
+    let mut hdr = [0u8; 512];
+    if file.read_exact_at(&mut hdr, 0).is_err() {
+        return Ok(None);
+    }
+    // Signature 0xBEDA107F at byte offset 64
+    if &hdr[64..68] != &[0x7f, 0x10, 0xda, 0xbe] {
+        return Ok(None);
+    }
+    let off_blocks = u32::from_le_bytes(hdr[340..344].try_into().unwrap()) as u64;
+    let off_data = u32::from_le_bytes(hdr[344..348].try_into().unwrap()) as u64;
+    let disk_size = u64::from_le_bytes(hdr[368..376].try_into().unwrap());
+    let block_size = u32::from_le_bytes(hdr[376..380].try_into().unwrap()) as u64;
+    let blocks_total = u32::from_le_bytes(hdr[384..388].try_into().unwrap()) as usize;
+
+    if block_size == 0 || blocks_total == 0 {
+        return Ok(None);
+    }
+
+    let mut bat_bytes = vec![0u8; blocks_total * 4];
+    file.read_exact_at(&mut bat_bytes, off_blocks)?;
+    let mut bat = Vec::with_capacity(blocks_total);
+    for chunk in bat_bytes.chunks_exact(4) {
+        bat.push(u32::from_le_bytes(chunk.try_into().unwrap()));
+    }
+
+    println!("[nbd:vdi] In-Tree Pure Rust loaded VDI: DiskSize={} MB, BlockSize={} KB, BlocksTotal={}, OffData={}",
+             disk_size / (1024 * 1024), block_size / 1024, blocks_total, off_data);
+
+    Ok(Some(VdiMeta {
+        disk_size,
+        block_size,
+        off_data,
+        bat: Arc::new(bat),
+    }))
+}
+
+#[derive(Clone, Debug)]
+pub struct Qcow2Meta {
+    pub virtual_disk_size: u64,
+    pub cluster_bits: u32,
+    pub cluster_size: u64,
+    pub l2_bits: u32,
+    pub l2_entries: usize,
+    pub l1_table: Arc<Vec<u64>>,
+}
+
+pub fn parse_qcow2_metadata(file: &std::fs::File) -> std::io::Result<Option<Qcow2Meta>> {
+    use std::os::unix::fs::FileExt;
+    let mut header = [0u8; 104];
+    if file.read_exact_at(&mut header, 0).is_err() {
+        return Ok(None);
+    }
+    if &header[0..4] != b"QFI\xfb" {
+        return Ok(None);
+    }
+    let version = u32::from_be_bytes(header[4..8].try_into().unwrap());
+    if version != 2 && version != 3 {
+        return Ok(None);
+    }
+    let cluster_bits = u32::from_be_bytes(header[20..24].try_into().unwrap());
+    if cluster_bits < 9 || cluster_bits > 28 {
+        return Ok(None);
+    }
+    let cluster_size = 1u64 << cluster_bits;
+    let virtual_disk_size = u64::from_be_bytes(header[24..32].try_into().unwrap());
+    let crypt_method = u32::from_be_bytes(header[32..36].try_into().unwrap());
+    if crypt_method != 0 {
+        eprintln!("[nbd:qcow2] Encrypted QCOW2 is not supported");
+        return Ok(None);
+    }
+    let l1_size = u32::from_be_bytes(header[36..40].try_into().unwrap()) as usize;
+    let l1_table_offset = u64::from_be_bytes(header[40..48].try_into().unwrap());
+
+    let mut l1_bytes = vec![0u8; l1_size * 8];
+    file.read_exact_at(&mut l1_bytes, l1_table_offset)?;
+    let mut l1_table = Vec::with_capacity(l1_size);
+    for chunk in l1_bytes.chunks_exact(8) {
+        l1_table.push(u64::from_be_bytes(chunk.try_into().unwrap()));
+    }
+
+    let l2_bits = cluster_bits - 3;
+    let l2_entries = 1usize << l2_bits;
+
+    println!("[nbd:qcow2] In-Tree Pure Rust loaded QCOW2 (v{}): VirtualSize={} MB, ClusterSize={} KB, L1 Entries={}",
+             version, virtual_disk_size / (1024 * 1024), cluster_size / 1024, l1_size);
+
+    Ok(Some(Qcow2Meta {
+        virtual_disk_size,
+        cluster_bits,
+        cluster_size,
+        l2_bits,
+        l2_entries,
+        l1_table: Arc::new(l1_table),
+    }))
+}
+
+#[derive(Clone, Debug)]
+pub struct VpcMeta {
+    pub virtual_disk_size: u64,
+    pub block_size: u64,
+    pub bitmap_bytes: u64,
+    pub bat: Arc<Vec<u32>>,
+}
+
+pub fn parse_vpc_metadata(file: &std::fs::File) -> std::io::Result<Option<VpcMeta>> {
+    use std::os::unix::fs::FileExt;
+    let file_len = file.metadata()?.len();
+    if file_len < 1024 {
+        return Ok(None);
+    }
+    let mut footer = [0u8; 512];
+    if file.read_exact_at(&mut footer, 0).is_err() {
+        return Ok(None);
+    }
+    if &footer[0..8] != b"conectix" {
+        if file.read_exact_at(&mut footer, file_len - 512).is_err() || &footer[0..8] != b"conectix" {
+            return Ok(None);
+        }
+    }
+    let disk_type = u32::from_be_bytes(footer[60..64].try_into().unwrap());
+    if disk_type != 3 && disk_type != 4 {
+        return Ok(None);
+    }
+    let virtual_disk_size = u64::from_be_bytes(footer[48..56].try_into().unwrap());
+
+    let mut dyn_hdr = [0u8; 512];
+    if file.read_exact_at(&mut dyn_hdr, 512).is_err() {
+        return Ok(None);
+    }
+    if &dyn_hdr[0..8] != b"cxsparse" {
+        return Ok(None);
+    }
+    let table_offset = u64::from_be_bytes(dyn_hdr[16..24].try_into().unwrap());
+    let max_entries = u32::from_be_bytes(dyn_hdr[28..32].try_into().unwrap()) as usize;
+    let block_size = u32::from_be_bytes(dyn_hdr[32..36].try_into().unwrap()) as u64;
+    if block_size == 0 || (block_size % 512) != 0 {
+        return Ok(None);
+    }
+
+    let bitmap_sectors = ((block_size / 512 / 8) + 511) / 512;
+    let bitmap_bytes = bitmap_sectors * 512;
+
+    let mut bat_bytes = vec![0u8; max_entries * 4];
+    file.read_exact_at(&mut bat_bytes, table_offset)?;
+    let mut bat = Vec::with_capacity(max_entries);
+    for chunk in bat_bytes.chunks_exact(4) {
+        bat.push(u32::from_be_bytes(chunk.try_into().unwrap()));
+    }
+
+    println!("[nbd:vpc] In-Tree Pure Rust loaded Dynamic VHD (VPC): DiskSize={} MB, BlockSize={} KB, BAT entries={}",
+             virtual_disk_size / (1024 * 1024), block_size / 1024, max_entries);
+
+    Ok(Some(VpcMeta {
+        virtual_disk_size,
+        block_size,
+        bitmap_bytes,
+        bat: Arc::new(bat),
+    }))
+}
+
 /// In-Tree Pure Rust Copy-On-Write (COW) Storage Driver
-/// Supports Direct Raw storage, Fixed VHD, Dynamic VHDX, and Split .diff Raw Sparse storage.
+/// Supports Direct Raw storage, Fixed VHD, Dynamic VHDX, VMDK, VDI, QCOW2, and Dynamic VHD (VPC).
 pub struct CowStorage {
     pub base_file: Arc<std::fs::File>,
     pub diff_file: Option<Arc<std::fs::File>>,
@@ -199,6 +419,10 @@ pub struct CowStorage {
     pub bitmap: Option<Arc<std::sync::RwLock<Vec<u8>>>>,
     pub is_read_only: bool,
     pub vhdx_meta: Option<VhdxMeta>,
+    pub vmdk_meta: Option<VmdkMeta>,
+    pub vdi_meta: Option<VdiMeta>,
+    pub qcow2_meta: Option<Qcow2Meta>,
+    pub vpc_meta: Option<VpcMeta>,
 }
 
 impl CowStorage {
@@ -213,13 +437,26 @@ impl CowStorage {
         };
 
         let vhdx_meta = parse_vhdx_metadata(&file)?;
+        let vmdk_meta = if vhdx_meta.is_none() { parse_vmdk_metadata(&file)? } else { None };
+        let vdi_meta = if vhdx_meta.is_none() && vmdk_meta.is_none() { parse_vdi_metadata(&file)? } else { None };
+        let qcow2_meta = if vhdx_meta.is_none() && vmdk_meta.is_none() && vdi_meta.is_none() { parse_qcow2_metadata(&file)? } else { None };
+        let vpc_meta = if vhdx_meta.is_none() && vmdk_meta.is_none() && vdi_meta.is_none() && qcow2_meta.is_none() { parse_vpc_metadata(&file)? } else { None };
+
         let mut export_size = if let Some(ref meta) = vhdx_meta {
+            meta.virtual_disk_size
+        } else if let Some(ref meta) = vmdk_meta {
+            meta.capacity
+        } else if let Some(ref meta) = vdi_meta {
+            meta.disk_size
+        } else if let Some(ref meta) = qcow2_meta {
+            meta.virtual_disk_size
+        } else if let Some(ref meta) = vpc_meta {
             meta.virtual_disk_size
         } else {
             file.metadata()?.len()
         };
 
-        if vhdx_meta.is_none() && export_size > 512 {
+        if vhdx_meta.is_none() && vmdk_meta.is_none() && vdi_meta.is_none() && qcow2_meta.is_none() && vpc_meta.is_none() && export_size > 512 {
             use std::os::unix::fs::FileExt;
             let mut footer = [0u8; 512];
             if file.read_exact_at(&mut footer, export_size - 512).is_ok() {
@@ -234,7 +471,7 @@ impl CowStorage {
             }
         }
 
-        let is_ro = is_read_only || vhdx_meta.is_some();
+        let is_ro = is_read_only || vhdx_meta.is_some() || vmdk_meta.is_some() || vdi_meta.is_some() || qcow2_meta.is_some() || vpc_meta.is_some();
         Ok((Self {
             base_file: Arc::new(file),
             diff_file: None,
@@ -245,19 +482,36 @@ impl CowStorage {
             bitmap: None,
             is_read_only: is_ro,
             vhdx_meta,
+            vmdk_meta,
+            vdi_meta,
+            qcow2_meta,
+            vpc_meta,
         }, is_ro))
     }
 
     pub fn open_cow(base_path: &str, diff_path: &str) -> std::io::Result<Self> {
         let base_file = OpenOptions::new().read(true).open(base_path)?;
         let vhdx_meta = parse_vhdx_metadata(&base_file)?;
+        let vmdk_meta = if vhdx_meta.is_none() { parse_vmdk_metadata(&base_file)? } else { None };
+        let vdi_meta = if vhdx_meta.is_none() && vmdk_meta.is_none() { parse_vdi_metadata(&base_file)? } else { None };
+        let qcow2_meta = if vhdx_meta.is_none() && vmdk_meta.is_none() && vdi_meta.is_none() { parse_qcow2_metadata(&base_file)? } else { None };
+        let vpc_meta = if vhdx_meta.is_none() && vmdk_meta.is_none() && vdi_meta.is_none() && qcow2_meta.is_none() { parse_vpc_metadata(&base_file)? } else { None };
+
         let mut export_size = if let Some(ref meta) = vhdx_meta {
+            meta.virtual_disk_size
+        } else if let Some(ref meta) = vmdk_meta {
+            meta.capacity
+        } else if let Some(ref meta) = vdi_meta {
+            meta.disk_size
+        } else if let Some(ref meta) = qcow2_meta {
+            meta.virtual_disk_size
+        } else if let Some(ref meta) = vpc_meta {
             meta.virtual_disk_size
         } else {
             base_file.metadata()?.len()
         };
 
-        if vhdx_meta.is_none() && export_size > 512 {
+        if vhdx_meta.is_none() && vmdk_meta.is_none() && vdi_meta.is_none() && qcow2_meta.is_none() && vpc_meta.is_none() && export_size > 512 {
             use std::os::unix::fs::FileExt;
             let mut footer = [0u8; 512];
             if base_file.read_exact_at(&mut footer, export_size - 512).is_ok() {
@@ -299,8 +553,8 @@ impl CowStorage {
             vec![0u8; bitmap_len]
         };
 
-        println!("[nbd:cow] Initialized CowStorage: Base='{}' ({} MB, RO, is_vhdx={}), Diff='{}' (Raw Sparse, blocks={}, idx='{}')",
-                 base_path, export_size / (1024 * 1024), vhdx_meta.is_some(), diff_path, num_blocks, idx_path);
+        println!("[nbd:cow] Initialized CowStorage: Base='{}' ({} MB, RO, is_vhdx={}, is_vmdk={}, is_vdi={}, is_qcow2={}, is_vpc={}), Diff='{}' (Raw Sparse, blocks={}, idx='{}')",
+                 base_path, export_size / (1024 * 1024), vhdx_meta.is_some(), vmdk_meta.is_some(), vdi_meta.is_some(), qcow2_meta.is_some(), vpc_meta.is_some(), diff_path, num_blocks, idx_path);
 
         Ok(Self {
             base_file: Arc::new(base_file),
@@ -312,11 +566,83 @@ impl CowStorage {
             bitmap: Some(Arc::new(std::sync::RwLock::new(bitmap_vec))),
             is_read_only: false,
             vhdx_meta,
+            vmdk_meta,
+            vdi_meta,
+            qcow2_meta,
+            vpc_meta,
         })
     }
 
     fn read_base_at(&self, buf: &mut [u8], offset: u64) -> std::io::Result<()> {
-        if let Some(ref vhdx) = self.vhdx_meta {
+        use std::os::unix::fs::FileExt;
+        if let Some(ref vmdk) = self.vmdk_meta {
+            let grain_bytes = vmdk.grain_size;
+            let gt_coverage = grain_bytes * (vmdk.num_gtes as u64);
+            let mut cur_offset = offset;
+            let mut buf_idx = 0;
+            let total_len = buf.len();
+
+            while buf_idx < total_len {
+                let gt_idx = (cur_offset / gt_coverage) as usize;
+                let in_gt = cur_offset % gt_coverage;
+                let gte_idx = (in_gt / grain_bytes) as usize;
+                let in_grain = in_gt % grain_bytes;
+                let chunk_len = ((grain_bytes - in_grain) as usize).min(total_len - buf_idx);
+
+                if gt_idx < vmdk.gd.len() {
+                    let gt_sector = vmdk.gd[gt_idx];
+                    if gt_sector != 0 {
+                        let mut gte_buf = [0u8; 4];
+                        if self.base_file.read_exact_at(&mut gte_buf, (gt_sector as u64) * 512 + (gte_idx as u64) * 4).is_ok() {
+                            let data_sector = u32::from_le_bytes(gte_buf);
+                            if data_sector != 0 {
+                                let file_off = (data_sector as u64) * 512 + in_grain;
+                                self.base_file.read_exact_at(&mut buf[buf_idx..buf_idx + chunk_len], file_off)?;
+                            } else {
+                                buf[buf_idx..buf_idx + chunk_len].fill(0);
+                            }
+                        } else {
+                            buf[buf_idx..buf_idx + chunk_len].fill(0);
+                        }
+                    } else {
+                        buf[buf_idx..buf_idx + chunk_len].fill(0);
+                    }
+                } else {
+                    buf[buf_idx..buf_idx + chunk_len].fill(0);
+                }
+
+                cur_offset += chunk_len as u64;
+                buf_idx += chunk_len;
+            }
+            Ok(())
+        } else if let Some(ref vdi) = self.vdi_meta {
+            let block_size = vdi.block_size;
+            let mut cur_offset = offset;
+            let mut buf_idx = 0;
+            let total_len = buf.len();
+
+            while buf_idx < total_len {
+                let blk_idx = (cur_offset / block_size) as usize;
+                let in_block = cur_offset % block_size;
+                let chunk_len = ((block_size - in_block) as usize).min(total_len - buf_idx);
+
+                if blk_idx < vdi.bat.len() {
+                    let p_block = vdi.bat[blk_idx];
+                    if p_block < 0xFFFFFFFE {
+                        let file_off = vdi.off_data + (p_block as u64) * block_size + in_block;
+                        self.base_file.read_exact_at(&mut buf[buf_idx..buf_idx + chunk_len], file_off)?;
+                    } else {
+                        buf[buf_idx..buf_idx + chunk_len].fill(0);
+                    }
+                } else {
+                    buf[buf_idx..buf_idx + chunk_len].fill(0);
+                }
+
+                cur_offset += chunk_len as u64;
+                buf_idx += chunk_len;
+            }
+            Ok(())
+        } else if let Some(ref vhdx) = self.vhdx_meta {
             let block_size = vhdx.block_size;
             let chunk_ratio = vhdx.chunk_ratio;
             let mut cur_offset = offset;
@@ -335,6 +661,80 @@ impl CowStorage {
                     let state = entry & 0x7;
                     if state == 6 {
                         let file_off = (entry & 0xFFFFFFFFFFF00000) + in_block_offset;
+                        self.base_file.read_exact_at(&mut buf[buf_idx..buf_idx + chunk_len], file_off)?;
+                    } else {
+                        buf[buf_idx..buf_idx + chunk_len].fill(0);
+                    }
+                } else {
+                    buf[buf_idx..buf_idx + chunk_len].fill(0);
+                }
+
+                cur_offset += chunk_len as u64;
+                buf_idx += chunk_len;
+            }
+            Ok(())
+        } else if let Some(ref qcow2) = self.qcow2_meta {
+            let cluster_size = qcow2.cluster_size;
+            let cluster_bits = qcow2.cluster_bits;
+            let l2_bits = qcow2.l2_bits;
+            let l2_entries = qcow2.l2_entries;
+            let mut cur_offset = offset;
+            let mut buf_idx = 0;
+            let total_len = buf.len();
+
+            while buf_idx < total_len {
+                let in_cluster = (cur_offset & (cluster_size - 1)) as usize;
+                let chunk_len = ((cluster_size as usize) - in_cluster).min(total_len - buf_idx);
+
+                let l1_idx = (cur_offset >> (cluster_bits + l2_bits)) as usize;
+                let l2_idx = ((cur_offset >> cluster_bits) as usize) & (l2_entries - 1);
+
+                if l1_idx < qcow2.l1_table.len() {
+                    let l1_entry = qcow2.l1_table[l1_idx];
+                    let l2_offset = l1_entry & 0x00fffffffffffe00;
+                    if l2_offset != 0 {
+                        let mut l2_buf = [0u8; 8];
+                        if self.base_file.read_exact_at(&mut l2_buf, l2_offset + (l2_idx as u64) * 8).is_ok() {
+                            let l2_entry = u64::from_be_bytes(l2_buf);
+                            let is_zero = (l2_entry & 1) == 1 && ((l2_entry >> 62) & 1) == 1;
+                            let cluster_offset = l2_entry & 0x00fffffffffffe00;
+                            if !is_zero && cluster_offset != 0 {
+                                self.base_file.read_exact_at(
+                                    &mut buf[buf_idx..buf_idx + chunk_len],
+                                    cluster_offset + in_cluster as u64,
+                                )?;
+                            } else {
+                                buf[buf_idx..buf_idx + chunk_len].fill(0);
+                            }
+                        } else {
+                            buf[buf_idx..buf_idx + chunk_len].fill(0);
+                        }
+                    } else {
+                        buf[buf_idx..buf_idx + chunk_len].fill(0);
+                    }
+                } else {
+                    buf[buf_idx..buf_idx + chunk_len].fill(0);
+                }
+
+                cur_offset += chunk_len as u64;
+                buf_idx += chunk_len;
+            }
+            Ok(())
+        } else if let Some(ref vpc) = self.vpc_meta {
+            let block_size = vpc.block_size;
+            let mut cur_offset = offset;
+            let mut buf_idx = 0;
+            let total_len = buf.len();
+
+            while buf_idx < total_len {
+                let blk_idx = (cur_offset / block_size) as usize;
+                let in_block = cur_offset % block_size;
+                let chunk_len = ((block_size - in_block) as usize).min(total_len - buf_idx);
+
+                if blk_idx < vpc.bat.len() {
+                    let sector_off = vpc.bat[blk_idx];
+                    if sector_off != 0xFFFFFFFF {
+                        let file_off = (sector_off as u64) * 512 + vpc.bitmap_bytes + in_block;
                         self.base_file.read_exact_at(&mut buf[buf_idx..buf_idx + chunk_len], file_off)?;
                     } else {
                         buf[buf_idx..buf_idx + chunk_len].fill(0);

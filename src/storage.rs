@@ -208,7 +208,7 @@ impl StorageManager {
     }
 
     async fn export_nbd(&self, port: u16, path: &str, fmt: DiskFormat) -> (Option<NbdBackend>, String) {
-        if fmt == DiskFormat::Raw || fmt == DiskFormat::Iso || fmt == DiskFormat::Vhdx {
+        if fmt == DiskFormat::Raw || fmt == DiskFormat::Iso || fmt == DiskFormat::Vhdx || fmt == DiskFormat::Vmdk || fmt == DiskFormat::Vdi || fmt == DiskFormat::Qcow2 || fmt == DiskFormat::Vpc {
             let diff_opt = std::env::var("COW_DIR").ok().map(|dir| {
                 let p = std::path::Path::new(path);
                 let fname = p.file_name().and_then(|s| s.to_str()).unwrap_or("disk");
@@ -218,7 +218,10 @@ impl StorageManager {
                     .replace(".img", "")
                     .replace(".raw", "")
                     .replace(".vhdx", "")
-                    .replace(".vhd", "");
+                    .replace(".vhd", "")
+                    .replace(".vmdk", "")
+                    .replace(".vdi", "")
+                    .replace(".qcow2", "");
                 format!("{}/{}.diff", dir, clean_name)
             });
 
@@ -323,6 +326,7 @@ impl StorageManager {
                     || lower.ends_with(".vhd")
                     || lower.ends_with(".vhdx")
                     || lower.ends_with(".vmdk")
+                    || lower.ends_with(".vdi")
                     || lower.ends_with(".iso")
                 {
                     files.push(name);
