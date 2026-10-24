@@ -1,0 +1,3 @@
+dist/* linguist-vendored
+templates/* linguist-vendored
+src/static/* linguist-vendored

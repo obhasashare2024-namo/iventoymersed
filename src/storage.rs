@@ -370,6 +370,17 @@ impl StorageManager {
                 let fmt = detect_disk_format(&fullpath).await;
                 let is_win = is_windows_image(&filename);
 
+                if is_win {
+                    if let Ok(Some(gpt)) = crate::bcd::inspect_disk_gpt(&fullpath) {
+                        log(&format!("[gpt] Windows image '{}': Disk GUID={}, ESP present={}", filename, gpt.disk_guid.to_string(), gpt.has_esp));
+                        if !gpt.has_esp {
+                            if let Some(ref w_part) = gpt.windows_partition {
+                                log(&format!("[gpt] Target lacks ESP partition. Windows Part GUID={}. Dynamic BCD generator ready.", w_part.unique_guid.to_string()));
+                            }
+                        }
+                    }
+                }
+
                 let (backend, b_type) = if !is_win || fmt == DiskFormat::Vhdx || boot_mode == BootMode::Nbd {
                     self.export_nbd(port, &fullpath, fmt).await
                 } else {

@@ -450,6 +450,53 @@ async fn initramfs_handler(
     serve_static(&cfg.initrd_path, method == Method::HEAD, req.headers().get(header::RANGE)).await
 }
 
+async fn vtoy_overlay_handler(
+    State(state): State<Arc<AppState>>,
+    ConnectInfo(client): ConnectInfo<SocketAddr>,
+    req: Request,
+) -> Response<Body> {
+    let method = req.method().clone();
+    req_log(&client, &format!("{} /vtoy/vtoy_overlay.cpio", method));
+    let cfg = state.storage.get_config().await;
+    let overlay_path = format!("{}/vtoy_overlay.cpio", cfg.vtoy_dir);
+    serve_static(&overlay_path, method == Method::HEAD, req.headers().get(header::RANGE)).await
+}
+
+async fn vtoy_bcd_handler(
+    State(state): State<Arc<AppState>>,
+    ConnectInfo(client): ConnectInfo<SocketAddr>,
+    Query(params): Query<HashMap<String, String>>,
+) -> Response<Body> {
+    req_log(&client, &format!("GET /vtoy/bcd (params={:?})", params));
+    if let Some(image_name) = params.get("image").or_else(|| params.get("target")) {
+        let snapshot = state.storage.health_targets().await;
+        if let Some(target) = snapshot.iter().find(|t| &t.file == image_name || &t.id == image_name) {
+            match crate::bcd::generate_patched_bcd_for_image(&target.path) {
+                Ok((bcd_bytes, _, _)) => {
+                    return Response::builder()
+                        .status(StatusCode::OK)
+                        .header(header::CONTENT_TYPE, "application/octet-stream")
+                        .header(header::CONTENT_DISPOSITION, "attachment; filename=\"BCD\"")
+                        .header(header::CONTENT_LENGTH, bcd_bytes.len())
+                        .body(Body::from(bcd_bytes))
+                        .unwrap();
+                }
+                Err(e) => {
+                    eprintln!("[server:bcd] Error generating BCD for {}: {}", target.path, e);
+                }
+            }
+        }
+    }
+
+    Response::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, "application/octet-stream")
+        .header(header::CONTENT_DISPOSITION, "attachment; filename=\"BCD\"")
+        .header(header::CONTENT_LENGTH, crate::bcd::BASELINE_BCD.len())
+        .body(Body::from(crate::bcd::BASELINE_BCD))
+        .unwrap()
+}
+
 async fn iso_handler(
     State(state): State<Arc<AppState>>,
     ConnectInfo(client): ConnectInfo<SocketAddr>,
@@ -586,6 +633,8 @@ pub fn make_app(state: Arc<AppState>) -> Router {
         .route("/grub/grub.cfg", any(track_b_grub_handler))
         .route("/vtoy/vmlinuz", any(vmlinuz_handler))
         .route("/vtoy/initramfs.img", any(initramfs_handler))
+        .route("/vtoy/vtoy_overlay.cpio", any(vtoy_overlay_handler))
+        .route("/vtoy/bcd", any(vtoy_bcd_handler))
         .route("/iso/{*file}", any(iso_handler))
         .route("/api/status", get(api_status))
         .route("/api/health", get(api_status))
