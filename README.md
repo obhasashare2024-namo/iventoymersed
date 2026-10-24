@@ -13,7 +13,7 @@
 
 ## 目录 / Table of Contents / 目次
 
-- [🇨🇳 中文說明 (Default Chinese)](#-中文說明-default-chinese)
+- [🇹🇼 繁體中文說明 (Default Traditional Chinese)](#-繁體中文說明-default-traditional-chinese)
   - [🚀 v3.3.0 重大突破與核心特色](#-v330-重大突破與核心特色)
   - [💎 核心特性深入解析](#-核心特性深入解析)
     - [1. 純 Rust 內建動態 VHDX 引擎 (Pure Rust In-Tree Dynamic VHDX Engine)](#1-純-rust-內建動態-vhdx-引擎-pure-rust-in-tree-dynamic-vhdx-engine)
@@ -43,7 +43,7 @@
 
 ---
 
-## 🇨🇳 中文說明 (Default Chinese)
+## 🇹🇼 繁體中文說明 (Default Traditional Chinese)
 
 ### 🚀 v3.3.0 重大突破與核心特色
 
