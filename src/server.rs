@@ -146,15 +146,30 @@ async fn serve_static(path: &str, is_head: bool, range: Option<&header::HeaderVa
                                 let chunk_len = end_pos - start_pos + 1;
                                 use tokio::io::{AsyncReadExt, AsyncSeekExt, SeekFrom};
                                 if file.seek(SeekFrom::Start(start_pos)).await.is_ok() {
-                                    let stream = ReaderStream::new(file.take(chunk_len));
+                                    let body = if is_head {
+                                        Body::empty()
+                                    } else if chunk_len <= 1024 * 1024 {
+                                        let mut buf = vec![0u8; chunk_len as usize];
+                                        match file.read_exact(&mut buf).await {
+                                            Ok(_) => Body::from(buf),
+                                            Err(_) => {
+                                                let stream = ReaderStream::new(file.take(chunk_len));
+                                                Body::from_stream(stream)
+                                            }
+                                        }
+                                    } else {
+                                        let stream = ReaderStream::new(file.take(chunk_len));
+                                        Body::from_stream(stream)
+                                    };
+
                                     return Response::builder()
                                         .status(StatusCode::PARTIAL_CONTENT)
                                         .header(header::CONTENT_TYPE, "application/octet-stream")
                                         .header(header::CONTENT_LENGTH, chunk_len)
                                         .header(header::CONTENT_RANGE, format!("bytes {}-{}/{}", start_pos, end_pos, len))
                                         .header(header::ACCEPT_RANGES, "bytes")
-                                        .header(header::CONNECTION, "close")
-                                        .body(if is_head { Body::empty() } else { Body::from_stream(stream) })
+                                        .header(header::CONNECTION, "keep-alive")
+                                        .body(body)
                                         .unwrap();
                                 }
                             }
@@ -169,7 +184,7 @@ async fn serve_static(path: &str, is_head: bool, range: Option<&header::HeaderVa
                     .header(header::CONTENT_TYPE, "application/octet-stream")
                     .header(header::CONTENT_LENGTH, len)
                     .header(header::ACCEPT_RANGES, "bytes")
-                    .header(header::CONNECTION, "close")
+                    .header(header::CONNECTION, "keep-alive")
                     .body(Body::empty())
                     .unwrap()
             } else if len < 10 * 1024 * 1024 {
@@ -180,7 +195,7 @@ async fn serve_static(path: &str, is_head: bool, range: Option<&header::HeaderVa
                         .header(header::CONTENT_TYPE, "application/octet-stream")
                         .header(header::CONTENT_LENGTH, bytes.len())
                         .header(header::ACCEPT_RANGES, "bytes")
-                        .header(header::CONNECTION, "close")
+                        .header(header::CONNECTION, "keep-alive")
                         .body(Body::from(bytes))
                         .unwrap()
                 } else {
@@ -190,7 +205,7 @@ async fn serve_static(path: &str, is_head: bool, range: Option<&header::HeaderVa
                         .header(header::CONTENT_TYPE, "application/octet-stream")
                         .header(header::CONTENT_LENGTH, len)
                         .header(header::ACCEPT_RANGES, "bytes")
-                        .header(header::CONNECTION, "close")
+                        .header(header::CONNECTION, "keep-alive")
                         .body(Body::from_stream(stream))
                         .unwrap()
                 }
@@ -202,7 +217,7 @@ async fn serve_static(path: &str, is_head: bool, range: Option<&header::HeaderVa
                     .header(header::CONTENT_TYPE, "application/octet-stream")
                     .header(header::CONTENT_LENGTH, len)
                     .header(header::ACCEPT_RANGES, "bytes")
-                    .header(header::CONNECTION, "close")
+                    .header(header::CONNECTION, "keep-alive")
                     .body(body)
                     .unwrap()
             }
@@ -364,7 +379,7 @@ async fn track_b_grub_handler(
         .status(StatusCode::OK)
         .header(header::CONTENT_TYPE, "text/plain; charset=utf-8")
         .header(header::CONTENT_LENGTH, cfg_text.len())
-        .header(header::CONNECTION, "close")
+        .header(header::CONNECTION, "keep-alive")
         .body(Body::from(cfg_text))
         .unwrap()
 }

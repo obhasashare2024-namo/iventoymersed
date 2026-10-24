@@ -56,6 +56,11 @@ pub async fn detect_disk_format(image_path: &str) -> DiskFormat {
                 let mut footer = [0u8; 512];
                 if let Ok(fn_) = file.read(&mut footer).await {
                     if fn_ >= 8 && &footer[0..8] == b"conectix" {
+                        let disk_type = u32::from_be_bytes([footer[60], footer[61], footer[62], footer[63]]);
+                        if disk_type == 2 {
+                            // Fixed VHD: Zero-offset raw payload with trailing footer -> Native Raw
+                            return DiskFormat::Raw;
+                        }
                         return DiskFormat::Vpc;
                     }
                 }
@@ -85,6 +90,9 @@ fn fallback_by_extension(image_path: &str) -> DiskFormat {
 
 pub fn is_windows_image(name: &str) -> bool {
     let l = name.to_ascii_lowercase();
+    if l.contains("linux") || l.contains("cos") || l.contains("artix") || l.contains("antix") || l.contains("ubuntu") || l.contains("debian") || l.contains("arch") {
+        return false;
+    }
     l.contains("win") || l.contains("windows") || l.ends_with(".vhd") || l.ends_with(".vhdx")
 }
 

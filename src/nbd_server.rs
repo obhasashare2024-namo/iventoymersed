@@ -72,7 +72,21 @@ impl CowStorage {
                 (ro_file, true)
             }
         };
-        let export_size = file.metadata()?.len();
+        let mut export_size = file.metadata()?.len();
+        if export_size > 512 {
+            use std::os::unix::fs::FileExt;
+            let mut footer = [0u8; 512];
+            if file.read_exact_at(&mut footer, export_size - 512).is_ok() {
+                if &footer[0..8] == b"conectix" {
+                    let disk_type = u32::from_be_bytes([footer[60], footer[61], footer[62], footer[63]]);
+                    if disk_type == 2 {
+                        println!("[nbd] Auto-detected Fixed VHD: stripping 512B trailer (file_size={} MB, raw_size={} MB)",
+                                 export_size / (1024 * 1024), (export_size - 512) / (1024 * 1024));
+                        export_size -= 512;
+                    }
+                }
+            }
+        }
         Ok((Self {
             base_file: Arc::new(file),
             diff_file: None,
@@ -87,7 +101,21 @@ impl CowStorage {
 
     pub fn open_cow(base_path: &str, diff_path: &str) -> std::io::Result<Self> {
         let base_file = OpenOptions::new().read(true).open(base_path)?;
-        let export_size = base_file.metadata()?.len();
+        let mut export_size = base_file.metadata()?.len();
+        if export_size > 512 {
+            use std::os::unix::fs::FileExt;
+            let mut footer = [0u8; 512];
+            if base_file.read_exact_at(&mut footer, export_size - 512).is_ok() {
+                if &footer[0..8] == b"conectix" {
+                    let disk_type = u32::from_be_bytes([footer[60], footer[61], footer[62], footer[63]]);
+                    if disk_type == 2 {
+                        println!("[nbd:cow] Auto-detected Fixed VHD: stripping 512B trailer (file_size={} MB, raw_size={} MB)",
+                                 export_size / (1024 * 1024), (export_size - 512) / (1024 * 1024));
+                        export_size -= 512;
+                    }
+                }
+            }
+        }
 
         let diff_file = OpenOptions::new()
             .read(true)

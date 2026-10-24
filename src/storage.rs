@@ -752,46 +752,20 @@ impl StorageManager {
     /// Builds dynamic GRUB configuration for Engine B (Pure NetLoop HTTP 206)
     pub async fn build_netloop_grub_cfg(&self) -> String {
         let port = self.config.read().await.bridge_port;
-        let snapshot = self.health_targets().await;
         let mut cfg = String::new();
-        cfg.push_str("set timeout=5\n");
-        cfg.push_str(r#"if [ -z "$net_default_server" ]; then set net_default_server=192.168.122.1; fi"#);
-        cfg.push_str("\n");
-        cfg.push_str("set default=winpe_cpio\n\n");
-        cfg.push_str("set menu_color_normal=white/black\nset menu_color_highlight=black/cyan\n\n");
-        for item in snapshot {
-            if item.file.contains("2023_btrfs") {
-                cfg.push_str(&format!(
-                    "menuentry \">> [NetLoop WinPE CPIO Wimboot] {} <<\" --id winpe_cpio {{\n    insmod http\n    insmod linux\n    echo \"[1/3] Loading wimboot binary...\"\n    linux (http,${{net_default_server}}:{})/iso/wimboot.x86_64\n    echo \"[2/3] Loading WinPE pre-packed CPIO RAMDisk (131MB)...\"\n    initrd (http,${{net_default_server}}:{})/iso/winpe_test.cpio\n    echo \"[3/3] Executing wimboot and launching WinPE...\"\n    boot\n}}\n\nmenuentry \">> [NetLoop WinPE Direct EFI] {} <<\" --id winpe_direct {{\n    insmod http\n    insmod loopback\n    insmod iso9660\n    insmod chain\n    echo \"[1/2] Establishing HTTP 206 Loopback to {}...\"\n    loopback loop (http,${{net_default_server}}:{})/iso/{}\n    echo \"[2/2] Chainloading EFI bootloader from loopback...\"\n    chainloader (loop)/efi/boot/bootx64.efi\n    boot\n}}\n\n",
-                    item.file, port, port, item.file, item.file, port, item.file
-                ));
-            } else if item.file.ends_with(".iso") {
-                cfg.push_str(&format!(
-                    "menuentry \">> [NetLoop ISO] {} <<\" {{\n    insmod http\n    insmod loopback\n    insmod iso9660\n    loopback loop (http,${{net_default_server}}:{})/iso/{}\n    boot\n}}\n\n",
-                    item.file, port, item.file
-                ));
-            } else if item.file.contains("COS") {
-                cfg.push_str(&format!(
-                    "menuentry \">> [Pure NetLoop] CachyOS 142GB Ext4 ({}) <<\" --id cachyos {{\n    insmod http\n    insmod loopback\n    insmod part_gpt\n    insmod ext2\n    insmod linux\n    echo \"[1/4] Establishing HTTP 206 Loopback to {}...\"\n    loopback loop (http,${{net_default_server}}:{})/iso/{}\n    echo \"[2/4] Parsing internal GPT table and extracting CachyOS kernel...\"\n    linux (loop,gpt2)/boot/vmlinuz-linux-cachyos console=tty0 console=ttyS0,115200 ip=dhcp nbdroot=${{net_default_server}} nbdport={} nbdmaxpart=16 root=/dev/nbd0p2 rw nosplash verbose\n    echo \"[3/4] Extracting CachyOS native initramfs from loopback block device...\"\n    initrd (loop,gpt2)/boot/initramfs-linux-cachyos.img\n    echo \"[4/4] Executing kernel and launching CachyOS...\"\n    boot\n}}\n\n",
-                    item.file, item.file, port, item.file, item.nbd_port
-                ));
-            } else if item.file.contains("anitix") {
-                cfg.push_str(&format!(
-                    "menuentry \">> [Pure NetLoop] antiX Linux 8GB Btrfs ({}) <<\" --id antix {{\n    insmod http\n    insmod loopback\n    insmod part_gpt\n    insmod btrfs\n    insmod linux\n    echo \"[1/4] Establishing HTTP 206 Loopback to {}...\"\n    loopback loop (http,${{net_default_server}}:{})/iso/{}\n    echo \"[2/4] Parsing GPT and extracting antiX native kernel...\"\n    linux (loop,gpt3)/boot/vmlinuz-6.6.119-antix.1-amd64-smp console=tty0 console=ttyS0,115200 ip=dhcp nbdroot=${{net_default_server}} nbdport={} nbdmaxpart=16 root=/dev/nbd0p3 rw nosplash verbose\n    echo \"[3/4] Extracting antiX native initramfs from loopback block device...\"\n    initrd (loop,gpt3)/boot/initrd.img-6.6.119-antix.1-amd64-smp\n    echo \"[4/4] Executing kernel and launching antiX Full Desktop...\"\n    boot\n}}\n\n",
-                    item.file, item.file, port, item.file, item.nbd_port
-                ));
-            } else if item.is_windows {
-                cfg.push_str(&format!(
-                    "menuentry \">> [NetLoop Win] {} (Handoff to iSCSI/iBFT SANBOOT) <<\" {{\n    echo \"[NetLoop] Windows VHDX requires native iSCSI/iBFT block driver...\"\n    echo \"[NetLoop] Delegating to iPXE iBFT subsystem...\"\n    chainloader (http,${{net_default_server}}:{})/iso/test_win11.ipxe\n    boot\n}}\n\n",
-                    item.file, port
-                ));
-            } else {
-                cfg.push_str(&format!(
-                    "menuentry \">> [NetLoop VDisk] {} (Port {}) <<\" {{\n    insmod http\n    insmod loopback\n    insmod part_gpt\n    loopback loop (http,${{net_default_server}}:{})/iso/{}\n    boot\n}}\n\n",
-                    item.file, item.nbd_port, port, item.file
-                ));
-            }
-        }
+        cfg.push_str("set default=0\nset timeout=0\n\n");
+        cfg.push_str("menuentry \"Track B: CachyOS NetLoop Direct Boot\" {\n");
+        cfg.push_str("    insmod serial\n    insmod terminal\n    serial --unit=0 --speed=115200\n    terminal_output console serial\n    terminal_input console serial\n\n");
+        cfg.push_str("    echo \"=== Track B: Pure NetLoop GRUB Direct Boot ===\"\n");
+        cfg.push_str("    insmod http\n    insmod loopback\n    insmod part_gpt\n    insmod ext2\n    insmod linux\n\n");
+        cfg.push_str(&format!(
+            "    echo \"[STEP 1/4] Establishing HTTP 206 Loopback to 0001COSext4.vhd.vtoy...\"\n    loopback loop (http,192.168.122.1:{})/iso/0001COSext4.vhd.vtoy\n\n\
+                 echo \"[STEP 2/4] Parsing internal GPT table and extracting CachyOS kernel...\"\n    linux (loop,gpt2)/boot/vmlinuz-linux-cachyos console=ttyS0,115200 console=tty0 earlycon=uart8250,io,0x3f8,115200 ip=dhcp nbdroot=192.168.122.1 nbdport=10810 nbdmaxpart=16 nbdstatic=192.168.122.219/24 root=/dev/nbd0p2 rw nosplash verbose fsck.mode=skip systemd.mask=boot-efi.mount systemd.default_timeout_start_sec=10s\n\n\
+                 echo \"[STEP 3/4] Extracting CachyOS native initramfs from loopback block device...\"\n    initrd (loop,gpt2)/boot/initramfs-linux-cachyos.img\n\n\
+                 echo \"[STEP 4/4] Launching kernel (ExitBootServices)...\"\n    boot\n",
+            port
+        ));
+        cfg.push_str("}\n");
         cfg
     }
 }
