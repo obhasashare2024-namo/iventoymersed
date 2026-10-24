@@ -49,8 +49,146 @@ const NBD_CMD_DISC: u16 = 2;
 const NBD_CMD_FLUSH: u16 = 3;
 const NBD_CMD_TRIM: u16 = 4;
 
+const VHDX_FILE_SIG: &[u8; 8] = b"vhdxfile";
+const VHDX_REGI_SIG: &[u8; 4] = b"regi";
+const VHDX_META_SIG: &[u8; 8] = b"metadata";
+
+const BAT_GUID: [u8; 16] = [0x66, 0x77, 0xc2, 0x2d, 0x23, 0xf6, 0x00, 0x42, 0x9d, 0x64, 0x11, 0x5e, 0x9b, 0xfd, 0x4a, 0x08];
+const META_GUID: [u8; 16] = [0x06, 0xa2, 0x7c, 0x8b, 0x90, 0x47, 0x9a, 0x4b, 0xb8, 0xfe, 0x57, 0x5f, 0x05, 0x0f, 0x88, 0x6e];
+
+const FILE_PARAMS_GUID: [u8; 16] = [0x37, 0x67, 0xa1, 0xca, 0x36, 0xfa, 0x43, 0x4d, 0xb3, 0xb6, 0x33, 0xf0, 0xaa, 0x44, 0xe7, 0x6b];
+const VDISK_SIZE_GUID: [u8; 16] = [0x24, 0x42, 0xa5, 0x2f, 0x1b, 0xcd, 0x76, 0x48, 0xb2, 0x11, 0x5d, 0xbe, 0xd8, 0x3b, 0xf4, 0xb8];
+const SECTOR_SIZE_GUID: [u8; 16] = [0x1d, 0xbf, 0x41, 0x81, 0x6f, 0xa9, 0x09, 0x47, 0xba, 0x47, 0xf2, 0x33, 0xa8, 0xfa, 0xab, 0x5f];
+
+#[derive(Clone, Debug)]
+pub struct VhdxMeta {
+    pub virtual_disk_size: u64,
+    pub block_size: u64,
+    pub chunk_ratio: u64,
+    pub bat: Arc<Vec<u64>>,
+}
+
+pub fn parse_vhdx_metadata(file: &std::fs::File) -> std::io::Result<Option<VhdxMeta>> {
+    use std::os::unix::fs::FileExt;
+    let mut sig = [0u8; 8];
+    if file.read_exact_at(&mut sig, 0).is_err() || &sig != VHDX_FILE_SIG {
+        return Ok(None);
+    }
+
+    let mut regi_hdr = [0u8; 16];
+    let mut regi_found = false;
+    let mut regi_offset = 196608u64;
+    for &candidate in &[196608u64, 262144u64] {
+        if file.read_exact_at(&mut regi_hdr, candidate).is_ok() && &regi_hdr[0..4] == VHDX_REGI_SIG {
+            regi_found = true;
+            regi_offset = candidate;
+            break;
+        }
+    }
+    if !regi_found {
+        return Ok(None);
+    }
+
+    let entry_cnt = u32::from_le_bytes(regi_hdr[8..12].try_into().unwrap()) as usize;
+    let mut bat_offset = None;
+    let mut bat_length = None;
+    let mut meta_offset = None;
+    let mut meta_length = None;
+
+    let mut entry_buf = [0u8; 32];
+    for i in 0..entry_cnt {
+        let off = regi_offset + 16 + (i as u64) * 32;
+        if file.read_exact_at(&mut entry_buf, off).is_err() {
+            break;
+        }
+        let guid = &entry_buf[0..16];
+        let file_off = u64::from_le_bytes(entry_buf[16..24].try_into().unwrap());
+        let length = u32::from_le_bytes(entry_buf[24..28].try_into().unwrap());
+        if guid == &BAT_GUID {
+            bat_offset = Some(file_off);
+            bat_length = Some(length);
+        } else if guid == &META_GUID {
+            meta_offset = Some(file_off);
+            meta_length = Some(length);
+        }
+    }
+
+    let (bat_off, bat_len) = match (bat_offset, bat_length) {
+        (Some(o), Some(l)) => (o, l),
+        _ => return Ok(None),
+    };
+    let (meta_off, _meta_len) = match (meta_offset, meta_length) {
+        (Some(o), Some(l)) => (o, l),
+        _ => return Ok(None),
+    };
+
+    let mut meta_hdr = [0u8; 32];
+    file.read_exact_at(&mut meta_hdr, meta_off)?;
+    if &meta_hdr[0..8] != VHDX_META_SIG {
+        return Ok(None);
+    }
+    let meta_entry_cnt = u16::from_le_bytes(meta_hdr[10..12].try_into().unwrap()) as usize;
+
+    let mut block_size = None;
+    let mut virtual_disk_size = None;
+    let mut logical_sector_size = 512u64;
+
+    for i in 0..meta_entry_cnt {
+        let off = meta_off + 32 + (i as u64) * 32;
+        if file.read_exact_at(&mut entry_buf, off).is_err() {
+            break;
+        }
+        let guid = &entry_buf[0..16];
+        let item_off = u32::from_le_bytes(entry_buf[16..20].try_into().unwrap()) as u64;
+        let item_len = u32::from_le_bytes(entry_buf[20..24].try_into().unwrap());
+
+        if guid == &FILE_PARAMS_GUID && item_len >= 4 {
+            let mut buf = [0u8; 4];
+            file.read_exact_at(&mut buf, meta_off + item_off)?;
+            block_size = Some(u32::from_le_bytes(buf) as u64);
+        } else if guid == &VDISK_SIZE_GUID && item_len >= 8 {
+            let mut buf = [0u8; 8];
+            file.read_exact_at(&mut buf, meta_off + item_off)?;
+            virtual_disk_size = Some(u64::from_le_bytes(buf));
+        } else if guid == &SECTOR_SIZE_GUID && item_len >= 4 {
+            let mut buf = [0u8; 4];
+            file.read_exact_at(&mut buf, meta_off + item_off)?;
+            logical_sector_size = u32::from_le_bytes(buf) as u64;
+        }
+    }
+
+    let b_size = match block_size {
+        Some(s) if s > 0 => s,
+        _ => return Ok(None),
+    };
+    let v_size = match virtual_disk_size {
+        Some(s) if s > 0 => s,
+        _ => return Ok(None),
+    };
+
+    let chunk_ratio = ((1u64 << 23) * logical_sector_size) / b_size;
+    let bat_entries = (bat_len as usize) / 8;
+    let mut bat_bytes = vec![0u8; bat_len as usize];
+    file.read_exact_at(&mut bat_bytes, bat_off)?;
+
+    let mut bat = Vec::with_capacity(bat_entries);
+    for chunk in bat_bytes.chunks_exact(8) {
+        bat.push(u64::from_le_bytes(chunk.try_into().unwrap()));
+    }
+
+    println!("[nbd:vhdx] In-Tree Pure Rust loaded Dynamic VHDX: VirtualDiskSize={} MB, BlockSize={} MB, ChunkRatio={}, BAT entries={}",
+             v_size / (1024 * 1024), b_size / (1024 * 1024), chunk_ratio, bat.len());
+
+    Ok(Some(VhdxMeta {
+        virtual_disk_size: v_size,
+        block_size: b_size,
+        chunk_ratio,
+        bat: Arc::new(bat),
+    }))
+}
+
 /// In-Tree Pure Rust Copy-On-Write (COW) Storage Driver
-/// Supports both Direct Raw storage and Split .diff Raw Sparse storage.
+/// Supports Direct Raw storage, Fixed VHD, Dynamic VHDX, and Split .diff Raw Sparse storage.
 pub struct CowStorage {
     pub base_file: Arc<std::fs::File>,
     pub diff_file: Option<Arc<std::fs::File>>,
@@ -60,6 +198,7 @@ pub struct CowStorage {
     pub block_size: u64,
     pub bitmap: Option<Arc<std::sync::RwLock<Vec<u8>>>>,
     pub is_read_only: bool,
+    pub vhdx_meta: Option<VhdxMeta>,
 }
 
 impl CowStorage {
@@ -72,8 +211,15 @@ impl CowStorage {
                 (ro_file, true)
             }
         };
-        let mut export_size = file.metadata()?.len();
-        if export_size > 512 {
+
+        let vhdx_meta = parse_vhdx_metadata(&file)?;
+        let mut export_size = if let Some(ref meta) = vhdx_meta {
+            meta.virtual_disk_size
+        } else {
+            file.metadata()?.len()
+        };
+
+        if vhdx_meta.is_none() && export_size > 512 {
             use std::os::unix::fs::FileExt;
             let mut footer = [0u8; 512];
             if file.read_exact_at(&mut footer, export_size - 512).is_ok() {
@@ -87,6 +233,8 @@ impl CowStorage {
                 }
             }
         }
+
+        let is_ro = is_read_only || vhdx_meta.is_some();
         Ok((Self {
             base_file: Arc::new(file),
             diff_file: None,
@@ -95,14 +243,21 @@ impl CowStorage {
             export_size,
             block_size: 4096,
             bitmap: None,
-            is_read_only,
-        }, is_read_only))
+            is_read_only: is_ro,
+            vhdx_meta,
+        }, is_ro))
     }
 
     pub fn open_cow(base_path: &str, diff_path: &str) -> std::io::Result<Self> {
         let base_file = OpenOptions::new().read(true).open(base_path)?;
-        let mut export_size = base_file.metadata()?.len();
-        if export_size > 512 {
+        let vhdx_meta = parse_vhdx_metadata(&base_file)?;
+        let mut export_size = if let Some(ref meta) = vhdx_meta {
+            meta.virtual_disk_size
+        } else {
+            base_file.metadata()?.len()
+        };
+
+        if vhdx_meta.is_none() && export_size > 512 {
             use std::os::unix::fs::FileExt;
             let mut footer = [0u8; 512];
             if base_file.read_exact_at(&mut footer, export_size - 512).is_ok() {
@@ -144,8 +299,8 @@ impl CowStorage {
             vec![0u8; bitmap_len]
         };
 
-        println!("[nbd:cow] Initialized CowStorage: Base='{}' ({} MB, RO), Diff='{}' (Raw Sparse, blocks={}, idx='{}')",
-                 base_path, export_size / (1024 * 1024), diff_path, num_blocks, idx_path);
+        println!("[nbd:cow] Initialized CowStorage: Base='{}' ({} MB, RO, is_vhdx={}), Diff='{}' (Raw Sparse, blocks={}, idx='{}')",
+                 base_path, export_size / (1024 * 1024), vhdx_meta.is_some(), diff_path, num_blocks, idx_path);
 
         Ok(Self {
             base_file: Arc::new(base_file),
@@ -156,12 +311,50 @@ impl CowStorage {
             block_size,
             bitmap: Some(Arc::new(std::sync::RwLock::new(bitmap_vec))),
             is_read_only: false,
+            vhdx_meta,
         })
+    }
+
+    fn read_base_at(&self, buf: &mut [u8], offset: u64) -> std::io::Result<()> {
+        if let Some(ref vhdx) = self.vhdx_meta {
+            let block_size = vhdx.block_size;
+            let chunk_ratio = vhdx.chunk_ratio;
+            let mut cur_offset = offset;
+            let mut buf_idx = 0;
+            let total_len = buf.len();
+
+            while buf_idx < total_len {
+                let p_idx = cur_offset / block_size;
+                let in_block_offset = cur_offset % block_size;
+                let block_rem = block_size - in_block_offset;
+                let chunk_len = (block_rem as usize).min(total_len - buf_idx);
+
+                let bat_idx = (p_idx + p_idx / chunk_ratio) as usize;
+                if bat_idx < vhdx.bat.len() {
+                    let entry = vhdx.bat[bat_idx];
+                    let state = entry & 0x7;
+                    if state == 6 {
+                        let file_off = (entry & 0xFFFFFFFFFFF00000) + in_block_offset;
+                        self.base_file.read_exact_at(&mut buf[buf_idx..buf_idx + chunk_len], file_off)?;
+                    } else {
+                        buf[buf_idx..buf_idx + chunk_len].fill(0);
+                    }
+                } else {
+                    buf[buf_idx..buf_idx + chunk_len].fill(0);
+                }
+
+                cur_offset += chunk_len as u64;
+                buf_idx += chunk_len;
+            }
+            Ok(())
+        } else {
+            self.base_file.read_exact_at(buf, offset)
+        }
     }
 
     pub fn read_at(&self, buf: &mut [u8], offset: u64) -> std::io::Result<()> {
         if self.diff_file.is_none() {
-            return self.base_file.read_exact_at(buf, offset);
+            return self.read_base_at(buf, offset);
         }
 
         let diff_file = self.diff_file.as_ref().unwrap();
@@ -189,7 +382,7 @@ impl CowStorage {
 
         if all_base {
             drop(bitmap_lock);
-            return self.base_file.read_exact_at(buf, offset);
+            return self.read_base_at(buf, offset);
         }
         if all_diff {
             drop(bitmap_lock);
@@ -217,7 +410,7 @@ impl CowStorage {
             if written {
                 diff_file.read_exact_at(slice, cur_offset)?;
             } else {
-                self.base_file.read_exact_at(slice, cur_offset)?;
+                self.read_base_at(slice, cur_offset)?;
             }
 
             cur_offset += chunk_len as u64;
@@ -231,6 +424,9 @@ impl CowStorage {
         if self.diff_file.is_none() {
             if self.is_read_only {
                 return Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "Read-only export"));
+            }
+            if self.vhdx_meta.is_some() {
+                return Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "Direct write to Dynamic VHDX without COW layer is prohibited"));
             }
             return self.base_file.write_all_at(data, offset);
         }
@@ -272,7 +468,7 @@ impl CowStorage {
                 // Read base block, overlay chunk, and commit full block to diff file
                 let read_len = (self.export_size.saturating_sub(block_start) as usize).min(block_size as usize);
                 let mut full_block = vec![0u8; read_len];
-                let _ = self.base_file.read_exact_at(&mut full_block, block_start);
+                let _ = self.read_base_at(&mut full_block, block_start);
                 let rel_offset = (cur_offset - block_start) as usize;
                 full_block[rel_offset..rel_offset + chunk_len].copy_from_slice(chunk);
                 diff_file.write_all_at(&full_block, block_start)?;

@@ -208,7 +208,7 @@ impl StorageManager {
     }
 
     async fn export_nbd(&self, port: u16, path: &str, fmt: DiskFormat) -> (Option<NbdBackend>, String) {
-        if fmt == DiskFormat::Raw || fmt == DiskFormat::Iso {
+        if fmt == DiskFormat::Raw || fmt == DiskFormat::Iso || fmt == DiskFormat::Vhdx {
             let diff_opt = std::env::var("COW_DIR").ok().map(|dir| {
                 let p = std::path::Path::new(path);
                 let fname = p.file_name().and_then(|s| s.to_str()).unwrap_or("disk");
@@ -216,7 +216,9 @@ impl StorageManager {
                     .replace(".img.vtoy", "")
                     .replace(".vtoy", "")
                     .replace(".img", "")
-                    .replace(".raw", "");
+                    .replace(".raw", "")
+                    .replace(".vhdx", "")
+                    .replace(".vhd", "");
                 format!("{}/{}.diff", dir, clean_name)
             });
 
@@ -368,7 +370,7 @@ impl StorageManager {
                 let fmt = detect_disk_format(&fullpath).await;
                 let is_win = is_windows_image(&filename);
 
-                let (backend, b_type) = if !is_win {
+                let (backend, b_type) = if !is_win || fmt == DiskFormat::Vhdx || boot_mode == BootMode::Nbd {
                     self.export_nbd(port, &fullpath, fmt).await
                 } else {
                     (None, "iscsi-ibft".to_string())
@@ -390,14 +392,14 @@ impl StorageManager {
                     is_windows: is_win,
                 };
 
-                if is_win || boot_mode == BootMode::Iscsi {
+                if (is_win || boot_mode == BootMode::Iscsi) && fmt != DiskFormat::Vhdx {
                     self.export_iscsi(tid, &iqn, &fullpath).await;
                 }
 
                 map.insert(vtoy_id.clone(), Target { info, backend });
             } else {
                 let t = map.get_mut(&vtoy_id).unwrap();
-                if !t.info.is_windows && (boot_mode == BootMode::Nbd || t.backend.is_some()) {
+                if boot_mode == BootMode::Nbd || t.backend.is_some() {
                     let need_respawn = match t.backend.as_mut() {
                         Some(NbdBackend::Embedded(_)) => false,
                         Some(NbdBackend::External(c)) => c.try_wait().ok().flatten().is_some(),

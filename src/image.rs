@@ -109,6 +109,12 @@ pub async fn has_partition_table(image_path: &str) -> bool {
         Ok(n) => n,
         Err(_) => return false,
     };
+    if n >= 8 && &buf[0..8] == b"vhdxfile" {
+        return true;
+    }
+    if is_windows_image(image_path) {
+        return true;
+    }
     if n >= 512 && buf[510] == 0x55 && buf[511] == 0xAA {
         for i in 0..4 {
             let base = 446 + i * 16;
