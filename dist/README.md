@@ -189,49 +189,57 @@ chmod +x iventoymersed
 
 ### 🛠️ 輕量 NAS 與 OpenWrt 部署實踐
 
+> [!TIP]
+> **全動態自適應與零硬編碼架構（Dynamic Host & Zero-Hardcoded Gate）**：
+> 本專案架構全面具備 **100% 網段與 IP 自適應能力**：
+> 1. **前端 Web 控制台**：完全依據瀏覽器當前訪問的 `window.location.host` 動態感知控制面地址與端口，並動態推導數據面連線，絕不寫死任何特定 IP；
+> 2. **iPXE / GRUB 引導鏈**：全面採用協議級動態宏變數 `${next-server}` 與 `${net_default_server}`，客戶端從哪個網關獲取引導即自動直連該節點；
+> 3. **文檔中的 IP 說明**：下文中所提及之 `192.168.91.11` 僅為實際生產環境的實體旁路由範例（亦實測過 `192.168.188.0/24` 等任意虛擬子網），在任何 `192.168.x.x`、`10.x.x.x` 或企業網段中皆能全自動隨插即用！
+
 #### 1. 外部終端 Web GUI 管理界面 (Control Deck)
 `iventoymersed` 雖然支援一行命令背景極速常駐，但其內核**原生整合了現代暗黑科幻風格的 HTML5 Control Deck 網頁控制台**：
-- **訪問位址**：在局域網任意設備（電腦/手機/平板）瀏覽器開啟 `http://<伺服器IP>:26001/`（例如 `http://192.168.91.11:26001/`）；
+- **訪問位址**：在局域網任意設備（電腦/手機/平板）瀏覽器開啟 `http://<伺服器IP>:26001/`（例如 `http://192.168.91.11:26001/` 或任意網段的 `http://<Router-IP>:26001/`）；
 - **核心功能看板**：
+  - **集群拓撲實時看板**：動態展示當前控制面節點 IP、數據面節點 IP、角色定位（Orchestrator vs Storage）、Universal COW 寫時保護狀態；
   - **實時健康狀態**：常駐 RSS 記憶體佔用（< 15MB）、在線虛擬磁盤總數、開機運行時長；
   - **全格式鏡像矩陣**：即時列出 Raw、Fixed VHD、Dynamic VPC、VHDX、VMDK、VDI、QCOW2 各檔案，顯示格式標籤、`:1081x` NBD 映射端口與 `⚡ In-Tree Rust` 核心狀態；
   - **一鍵遠端調度**：支援網頁端點選「設為默認引導」、「一鍵重新掃描磁碟目錄（`/api/rescan`）」；
   - **MAC 特定綁定**：可為指定客戶端 MAC 地址單獨綁定專屬系統映像（如遊戲機載入 Win11，運維機載入 antiX）；
   - **手選菜單模擬器**：實時預覽終端客戶端將會目擊到的 iPXE 選擇列表，並支援「一鍵複製 Boot URL」。
 
-#### 2. 91.11 作為 OpenWrt 旁路由（Side Router）的實戰部署 SOP
-在典型家用或企業局域網中，主路由（如 `192.168.91.1`）負責 PPPoE 撥號與 WAN 訪問，而 **91.11（極路由 X C526A / IPQ40xx 四核 ARMv7，512MB RAM）** 則作為專用無盤與邊緣算力旁路由。
+#### 2. OpenWrt 旁路由（Side Router）實戰部署 SOP（以 192.168.91.11 為例，泛用於任意網段）
+在典型家用或企業局域網中，主路由（如 `192.168.91.1` 或 `192.168.1.1`）負責 PPPoE 撥號與 WAN 訪問，而專用旁路由（如 `192.168.91.11`，極路由 X C526A / IPQ40xx 四核 ARMv7，512MB RAM）則作為專用無盤與邊緣算力調度大腦。
 
 ##### 步驟一：上傳與常駐運行
-將靜態編譯的 `iventoymersed-armv7` 上傳至 91.11（如外接隨身碟 `/mnt/sda1/`）：
+將靜態編譯的 `iventoymersed-armv7` 上傳至旁路由（如外接隨身碟 `/mnt/sda1/`）：
 ```bash
-# 本地推送至 91.11
-scp dist/iventoymersed-armv7 root@192.168.91.11:/mnt/sda1/iventoymersed
+# 本地推送至旁路由
+scp dist/iventoymersed-armv7 root@<旁路由IP>:/mnt/sda1/iventoymersed
 
-# 在 91.11 上賦予執行權限並一行指令背景啟動
+# 在旁路由上賦予執行權限並一行指令背景啟動
 chmod +x /mnt/sda1/iventoymersed
 COW_DIR=/tmp/cow VTOY_DIR=/mnt/iso /mnt/sda1/iventoymersed > /var/log/iventoymersed.log 2>&1 &
 ```
 
 ##### 步驟二：配置 Proxy-DHCP（零干擾主路由，免改動主網關）
-無須在主路由 `192.168.91.1` 上更動任何 DHCP 參數，直接在 91.11 的 `/etc/dnsmasq.conf` 末尾追加 PXE 代理配置：
+無須在主路由上更動任何 DHCP 參數，直接在旁路由的 `/etc/dnsmasq.conf` 末尾追加 PXE 代理配置（將 `<旁路由IP>` 與 `<網段>` 替換為實際網絡參數）：
 ```dnsmasq
 # 僅監聽並響應網內 PXE 引導廣播，不干擾主路由發放普通 IP：
-dhcp-range=192.168.91.0,proxy
+dhcp-range=<網段例如192.168.91.0>,proxy
 dhcp-match=set:bios,option:client-arch,0
-dhcp-boot=tag:bios,undionly.kpxe,,192.168.91.11
+dhcp-boot=tag:bios,undionly.kpxe,,<旁路由IP>
 dhcp-match=set:efi64,option:client-arch,7
 dhcp-match=set:efi64,option:client-arch,9
-dhcp-boot=tag:efi64,ipxe.efi,,192.168.91.11
+dhcp-boot=tag:efi64,ipxe.efi,,<旁路由IP>
 ```
-重啟 dnsmasq 即刻生效：`/etc/init.d/dnsmasq restart`。客戶端開機按下 F12 即自動命中 91.11 旁路由並拉起選單！
+重啟 dnsmasq 即刻生效：`/etc/init.d/dnsmasq restart`。客戶端開機按下 F12 即自動命中旁路由並拉起選單！
 
-#### 3. 映像檔不儲存於 91.11 時的無盤調度架構（只讀說明）
-91.11 路由器本機只有微小 Flash（128MB~512MB），絕無法容納 10GB~70GB 的大型 VHDX/VMDK 鏡像。在實際生產中，推薦採用以下兩種**零本地磁盤佔用**的架構：
+#### 3. 映像檔不儲存於旁路由時的無盤調度架構（只讀說明）
+旁路由器本機通常只有微小 Flash（128MB~512MB），絕無法容納 10GB~70GB 的大型 VHDX/VMDK 鏡像。在實際生產中，推薦採用以下兩種**零本地磁盤佔用**的架構：
 
 ##### 【架構 A：NFS / CIFS 網路磁區只讀直掛（NAS Storage Backing）】
-- **母盤存儲端**：鏡像存儲於大容量 NAS（如 91.12 R2D 2TB 硬碟或 91.175 高性能 NAS `/mnt/ax9/`）；
-- **旁路由掛載**：91.11 開機時以**物理只讀（`ro`）**模式掛載 NAS 共享：
+- **母盤存儲端**：鏡像存儲於大容量 NAS（如遠端 NAS `/mnt/R2D/iso` 或 `/mnt/ax9/`）；
+- **旁路由掛載**：旁路由開機時以**物理只讀（`ro`）**模式掛載 NAS 共享：
   ```bash
   mkdir -p /mnt/iso
   # 掛載 NFSv4（推薦，效能極高）

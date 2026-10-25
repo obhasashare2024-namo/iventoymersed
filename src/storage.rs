@@ -790,7 +790,11 @@ impl StorageManager {
 
     /// Builds dynamic GRUB configuration for Engine B (Pure NetLoop HTTP 206)
     pub async fn build_netloop_grub_cfg(&self) -> String {
-        let port = self.config.read().await.bridge_port;
+        let (port, storage_node) = {
+            let c = self.config.read().await;
+            let node = c.storage_node.clone().unwrap_or_else(|| "${net_default_server}".to_string());
+            (c.bridge_port, node)
+        };
         let mut cfg = String::new();
         cfg.push_str("set default=0\nset timeout=0\n\n");
         cfg.push_str("menuentry \"Track B: CachyOS NetLoop Direct Boot\" {\n");
@@ -798,11 +802,11 @@ impl StorageManager {
         cfg.push_str("    echo \"=== Track B: Pure NetLoop GRUB Direct Boot ===\"\n");
         cfg.push_str("    insmod http\n    insmod loopback\n    insmod part_gpt\n    insmod ext2\n    insmod linux\n\n");
         cfg.push_str(&format!(
-            "    echo \"[STEP 1/4] Establishing HTTP 206 Loopback to 0001COSext4.vhd.vtoy...\"\n    loopback loop (http,192.168.122.1:{})/iso/0001COSext4.vhd.vtoy\n\n\
-                 echo \"[STEP 2/4] Parsing internal GPT table and extracting CachyOS kernel...\"\n    linux (loop,gpt2)/boot/vmlinuz-linux-cachyos console=ttyS0,115200 console=tty0 earlycon=uart8250,io,0x3f8,115200 ip=dhcp nbdroot=192.168.122.1 nbdport=10810 nbdmaxpart=16 nbdstatic=192.168.122.219/24 root=/dev/nbd0p2 rw nosplash verbose fsck.mode=skip systemd.mask=boot-efi.mount systemd.default_timeout_start_sec=10s\n\n\
+            "    echo \"[STEP 1/4] Establishing HTTP 206 Loopback to 0001COSext4.vhd.vtoy...\"\n    loopback loop (http,{}:{port})/iso/0001COSext4.vhd.vtoy\n\n\
+                 echo \"[STEP 2/4] Parsing internal GPT table and extracting CachyOS kernel...\"\n    linux (loop,gpt2)/boot/vmlinuz-linux-cachyos console=ttyS0,115200 console=tty0 earlycon=uart8250,io,0x3f8,115200 ip=dhcp nbdroot={} nbdport=10810 nbdmaxpart=16 root=/dev/nbd0p2 rw nosplash verbose fsck.mode=skip systemd.mask=boot-efi.mount systemd.default_timeout_start_sec=10s\n\n\
                  echo \"[STEP 3/4] Extracting CachyOS native initramfs from loopback block device...\"\n    initrd (loop,gpt2)/boot/initramfs-linux-cachyos.img\n\n\
                  echo \"[STEP 4/4] Launching kernel (ExitBootServices)...\"\n    boot\n",
-            port
+            storage_node, storage_node
         ));
         cfg.push_str("}\n");
         cfg

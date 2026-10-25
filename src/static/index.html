@@ -499,7 +499,7 @@
               </span>
             </div>
             <div style="font-size: 12px; color: var(--text-dim); margin-top: 2px;">
-              控制面與數據面解耦運作中 · 數據節點: <span id="storage-node-display" style="font-family: var(--mono); color: var(--accent-emerald);">動態 ${next-server}</span>
+              控制面節點: <span id="control-node-display" style="font-family: var(--mono); color: var(--accent-cyan); font-weight: 600;">--</span> · 數據面節點: <span id="storage-node-display" style="font-family: var(--mono); color: var(--accent-emerald); font-weight: 600;">動態自適應</span>
             </div>
           </div>
         </div>
@@ -682,10 +682,15 @@
           roleBadge.style.color = "var(--accent-emerald)";
           roleBadge.style.borderColor = "rgba(16, 185, 129, 0.3)";
         }
+        // Dynamic Sensing of Control Plane Host / IP
+        const currentHost = window.location.host;
+        const currentHostname = window.location.hostname;
+        document.getElementById("control-node-display").innerText = currentHost;
+
         if (data.storage_node) {
           document.getElementById("storage-node-display").innerText = `${data.storage_node}:${data.storage_port || 26001}`;
         } else {
-          document.getElementById("storage-node-display").innerText = "動態 ${next-server}";
+          document.getElementById("storage-node-display").innerText = `動態自適應 (\${next-server} 默認直連 ${currentHostname})`;
         }
 
         // Win Mode Switcher
