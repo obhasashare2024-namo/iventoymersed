@@ -189,22 +189,71 @@ chmod +x iventoymersed
 
 ### 🛠️ 輕量 NAS 與 OpenWrt 部署實踐
 
-#### 在 OpenWrt (op) 路由器上部署（以極路由 X HC5961 / MT7621 / ARMv7 為例）
-1. 將 `iventoymersed-armv7` 上傳至路由器的外接儲存設備（如 `/mnt/sda1/iventoy/`）：
-   ```bash
-   scp iventoymersed-armv7 root@192.168.1.1:/mnt/sda1/iventoy/iventoymersed
-   ```
-2. 在 OpenWrt 終端設置執行權限並啟動：
-   ```bash
-   chmod +x /mnt/sda1/iventoy/iventoymersed
-   COW_DIR=/mnt/sda1/cow /mnt/sda1/iventoy/iventoymersed --config /mnt/sda1/iventoy/config.yaml > /var/log/iventoy.log 2>&1 &
-   ```
-3. 在 `/etc/config/dhcp` 中加入無盤啟動項：
-   ```uci
-   uci add_list dhcp.@dnsmasq[0].dhcp_boot='undionly.kpxe,,192.168.1.1'
-   uci commit dhcp
-   /etc/init.d/dnsmasq restart
-   ```
+#### 1. 外部終端 Web GUI 管理界面 (Control Deck)
+`iventoymersed` 雖然支援一行命令背景極速常駐，但其內核**原生整合了現代暗黑科幻風格的 HTML5 Control Deck 網頁控制台**：
+- **訪問位址**：在局域網任意設備（電腦/手機/平板）瀏覽器開啟 `http://<伺服器IP>:26001/`（例如 `http://192.168.91.11:26001/`）；
+- **核心功能看板**：
+  - **實時健康狀態**：常駐 RSS 記憶體佔用（< 15MB）、在線虛擬磁盤總數、開機運行時長；
+  - **全格式鏡像矩陣**：即時列出 Raw、Fixed VHD、Dynamic VPC、VHDX、VMDK、VDI、QCOW2 各檔案，顯示格式標籤、`:1081x` NBD 映射端口與 `⚡ In-Tree Rust` 核心狀態；
+  - **一鍵遠端調度**：支援網頁端點選「設為默認引導」、「一鍵重新掃描磁碟目錄（`/api/rescan`）」；
+  - **MAC 特定綁定**：可為指定客戶端 MAC 地址單獨綁定專屬系統映像（如遊戲機載入 Win11，運維機載入 antiX）；
+  - **手選菜單模擬器**：實時預覽終端客戶端將會目擊到的 iPXE 選擇列表，並支援「一鍵複製 Boot URL」。
+
+#### 2. 91.11 作為 OpenWrt 旁路由（Side Router）的實戰部署 SOP
+在典型家用或企業局域網中，主路由（如 `192.168.91.1`）負責 PPPoE 撥號與 WAN 訪問，而 **91.11（極路由 X C526A / IPQ40xx 四核 ARMv7，512MB RAM）** 則作為專用無盤與邊緣算力旁路由。
+
+##### 步驟一：上傳與常駐運行
+將靜態編譯的 `iventoymersed-armv7` 上傳至 91.11（如外接隨身碟 `/mnt/sda1/`）：
+```bash
+# 本地推送至 91.11
+scp dist/iventoymersed-armv7 root@192.168.91.11:/mnt/sda1/iventoymersed
+
+# 在 91.11 上賦予執行權限並一行指令背景啟動
+chmod +x /mnt/sda1/iventoymersed
+COW_DIR=/tmp/cow VTOY_DIR=/mnt/iso /mnt/sda1/iventoymersed > /var/log/iventoymersed.log 2>&1 &
+```
+
+##### 步驟二：配置 Proxy-DHCP（零干擾主路由，免改動主網關）
+無須在主路由 `192.168.91.1` 上更動任何 DHCP 參數，直接在 91.11 的 `/etc/dnsmasq.conf` 末尾追加 PXE 代理配置：
+```dnsmasq
+# 僅監聽並響應網內 PXE 引導廣播，不干擾主路由發放普通 IP：
+dhcp-range=192.168.91.0,proxy
+dhcp-match=set:bios,option:client-arch,0
+dhcp-boot=tag:bios,undionly.kpxe,,192.168.91.11
+dhcp-match=set:efi64,option:client-arch,7
+dhcp-match=set:efi64,option:client-arch,9
+dhcp-boot=tag:efi64,ipxe.efi,,192.168.91.11
+```
+重啟 dnsmasq 即刻生效：`/etc/init.d/dnsmasq restart`。客戶端開機按下 F12 即自動命中 91.11 旁路由並拉起選單！
+
+#### 3. 映像檔不儲存於 91.11 時的無盤調度架構（只讀說明）
+91.11 路由器本機只有微小 Flash（128MB~512MB），絕無法容納 10GB~70GB 的大型 VHDX/VMDK 鏡像。在實際生產中，推薦採用以下兩種**零本地磁盤佔用**的架構：
+
+##### 【架構 A：NFS / CIFS 網路磁區只讀直掛（NAS Storage Backing）】
+- **母盤存儲端**：鏡像存儲於大容量 NAS（如 91.12 R2D 2TB 硬碟或 91.175 高性能 NAS `/mnt/ax9/`）；
+- **旁路由掛載**：91.11 開機時以**物理只讀（`ro`）**模式掛載 NAS 共享：
+  ```bash
+  mkdir -p /mnt/iso
+  # 掛載 NFSv4（推薦，效能極高）
+  mount -t nfs 192.168.91.12:/mnt/R2D/iso /mnt/iso -o ro,nolock
+  # 或掛載 CIFS/Samba
+  # mount -t cifs //192.168.91.175/ax9/iso /mnt/iso -o ro,guest
+  ```
+- **只讀安全機制**：
+  - `iventoymersed` 運行時指定 `VTOY_DIR=/mnt/iso`；
+  - 指定 `COW_DIR=/tmp/cow`：`/tmp` 在 OpenWrt 上為記憶體虛擬磁區（tmpfs），客戶端的所有寫入全部攔截在 91.11 的 RAM 暫存中；
+  - **91.11 本機 Flash 磁盤佔用為 0 Byte**，客戶端重啟即秒級復原，遠端 NAS 上的黃金母盤 100% 免疫污染。
+
+##### 【架構 B：控制面與數據面解耦引導（Decoupled Orchestrator & Cross-Host Chainload）】
+- **控制面（Control Plane）**：91.11 僅作為**「全域引導調度大腦」**（跑 Web Deck 控制台、監聽 26001、分發 DHCP Option 66/67 與 iPXE 菜單）；
+- **數據面（Data Plane）**：巨型磁盤檔案與 NBD/HTTP 串流實體部署在高吞吐算力機（如 91.29 PC NVMe 或 91.175 萬兆 NAS）；
+- **跨節點調度**：91.11 的引導腳本中，將客戶端開機請求重定向（Chainload）至真實數據節點：
+  ```ipxe
+  # 客戶端自 91.11 旁路由取得選單，但數十 GB 的虛擬磁盤流量直連 91.29 / 91.175
+  kernel http://192.168.91.29:26001/vtoy/vmlinuz ...
+  initrd http://192.168.91.29:26001/vtoy/initramfs.img
+  ```
+- **核心優勢**：91.11 本身完全不介入大型磁盤 I/O，**幾十台機器並發開機的幾百 GB 流量直接在核心交換機與 NAS 之間傳輸**，完全不佔用 91.11 路由器的 CPU 與記憶體！
 
 ---
 
@@ -265,6 +314,39 @@ menuentry "Native Linux (Zero-Touch Multiple Initrd Overlay)" {
 
 ---
 
+### Lightweight NAS & OpenWrt Edge Deployment
+
+#### 1. Embedded Web GUI Control Deck
+`iventoymersed` features a built-in sci-fi dark-themed HTML5 Control Deck:
+- **URL**: Open `http://<server-ip>:26001/` in any browser (e.g. `http://192.168.91.11:26001/`);
+- **Features**: Live RSS memory usage (< 15MB), multi-format virtual disk monitor, NBD ports (`:1081x`), one-click "Set as Default", directory rescan (`/api/rescan`), MAC-specific image binding, and live iPXE menu preview.
+
+#### 2. OpenWrt Side Router (e.g. 192.168.91.11 / ARMv7) Setup SOP
+In a typical network where the main gateway is `192.168.91.1`, the OpenWrt router (`192.168.91.11`) acts as a dedicated Netboot Side Router.
+- **Run Daemon**:
+  ```bash
+  chmod +x /mnt/sda1/iventoymersed
+  COW_DIR=/tmp/cow VTOY_DIR=/mnt/iso /mnt/sda1/iventoymersed > /var/log/iventoymersed.log 2>&1 &
+  ```
+- **Proxy-DHCP Configuration (Zero changes to main router)**:
+  Add to `/etc/dnsmasq.conf` on `192.168.91.11`:
+  ```dnsmasq
+  dhcp-range=192.168.91.0,proxy
+  dhcp-match=set:bios,option:client-arch,0
+  dhcp-boot=tag:bios,undionly.kpxe,,192.168.91.11
+  dhcp-match=set:efi64,option:client-arch,7
+  dhcp-match=set:efi64,option:client-arch,9
+  dhcp-boot=tag:efi64,ipxe.efi,,192.168.91.11
+  ```
+  Restart dnsmasq: `/etc/init.d/dnsmasq restart`. Clients pressing F12 boot directly from `192.168.91.11`.
+
+#### 3. Remote Storage Orchestration (0 Byte Local Disk Footprint)
+Since embedded routers have tiny flash (128M~512M), images (10G~70G) reside on external NAS/PC:
+- **Architecture A (NFS/CIFS Read-Only Mount)**: Mount remote NAS storage read-only at `/mnt/iso` on 91.11. Client writes are trapped in `/tmp/cow` (RAM tmpfs). 0 byte local flash consumed.
+- **Architecture B (Control/Data Decoupling)**: 91.11 serves as the Control Plane (Web Deck & DHCP/iPXE menu). Massive virtual disk I/O streams directly between client PCs and storage servers (`192.168.91.29` or `192.168.91.175`), completely offloading router CPU/RAM.
+
+---
+
 ### Quick Start
 
 ```bash
@@ -308,6 +390,39 @@ chmod +x iventoymersed
    - 1.7MB〜1.9MB の完全静的 Musl バイナリ（glibc 不要）；
    - **OpenWrt**、極路由 X（HC5961 / ARMv7）、**TrueNAS**、**CasaOS**、**Unraid**、各種市販 NAS でそのまま動作；
    - 常駐メモリ（RSS）15MB 未満で、安価なルーターを高性能ディスクレスサーバーへ変貌させます。
+
+---
+
+### 軽量 NAS および OpenWrt への導入
+
+#### 1. 組み込み Web GUI 管理画面 (Control Deck)
+`iventoymersed` は、ブラウザから操作可能なダークテーマの HTML5 Control Deck を内蔵しています：
+- **アクセス URL**: ブラウザで `http://<サーバーIP>:26001/` を開きます（例: `http://192.168.91.11:26001/`）；
+- **主な機能**: 常駐メモリ使用量（< 15MB）、仮想ディスク（Raw/VHD/VHDX/VMDK/VDI/QCOW2）ステータス一覧、NBD ポート番号（`:1081x`）、デフォルト起動イメージ設定、ディレクトリ再スキャン（`/api/rescan`）、MAC アドレス固有のイメージ紐付け、iPXE メニューシミュレーター。
+
+#### 2. OpenWrt 旁ルーター（Side Router、例: 192.168.91.11）導入手順
+メインルーター（`192.168.91.1`）の設定を変更することなく、OpenWrt 旁ルーター（`192.168.91.11`）をディスクレスサーバーとして稼働させます。
+- **起動**:
+  ```bash
+  chmod +x /mnt/sda1/iventoymersed
+  COW_DIR=/tmp/cow VTOY_DIR=/mnt/iso /mnt/sda1/iventoymersed > /var/log/iventoymersed.log 2>&1 &
+  ```
+- **Proxy-DHCP 設定（メインルーター無変更で共存）**:
+  `192.168.91.11` の `/etc/dnsmasq.conf` に追加：
+  ```dnsmasq
+  dhcp-range=192.168.91.0,proxy
+  dhcp-match=set:bios,option:client-arch,0
+  dhcp-boot=tag:bios,undionly.kpxe,,192.168.91.11
+  dhcp-match=set:efi64,option:client-arch,7
+  dhcp-match=set:efi64,option:client-arch,9
+  dhcp-boot=tag:efi64,ipxe.efi,,192.168.91.11
+  ```
+  dnsmasq を再起動：`/etc/init.d/dnsmasq restart`。
+
+#### 3. ルーター本体にイメージを保存しないリモート起動方式（読み取り専用）
+ルーターの内蔵 Flash は極めて小さいため、大容量イメージ（10GB〜70GB）は外部 NAS や PC に保持します：
+- **方式 A（NFS/CIFS 読み取り専用マウント）**: リモート NAS を `/mnt/iso` に `ro` でマウント。クライアントの書き込みはルーターの `/tmp/cow`（RAM tmpfs）で遮断され、ルーター内蔵 Flash の消費は **0 バイト**。
+- **方式 B（制御面とデータ面の分離・チェーンロード）**: `192.168.91.11` は Web Deck と DHCP/iPXE メニュー配布（Control Plane）に特化し、数十GBのディスク通信（Data Plane）はクライアントと高速 NAS（`192.168.91.29` / `192.168.91.175`）間で直接ストリーミングされます。
 
 ---
 
