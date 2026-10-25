@@ -6,5 +6,6 @@ dist/.bak/
 dist/*-highperf*
 dist/*-original
 dist/iventoy-ipxe*
-screenshots/
+/screenshots/
+!docs/screenshots/
 .__smbfile*

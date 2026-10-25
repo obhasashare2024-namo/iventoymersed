@@ -11,8 +11,18 @@
 
 ---
 
+### 📚 三語保姆式圖文教程 / Step-by-Step Tutorials / 保守・導入チュートリアル
+
+> **最新實測保姆式圖文教程已全量發布！涵蓋旁路由解耦集群、零硬編碼、純 Web 0 命令行操控、客戶端 MAC/靜態 IP 預選與 Win11/Linux 雙實機開機驗證：**  
+> - 🇹🇼 **[繁體中文保姆式圖文教程 (完整圖文步驟 · 解耦集群 · 0 CLI 純 Web 操控 · 實測驗收)](docs/TUTORIAL.md)**  
+> - 🇺🇸 **[English Step-by-Step Tutorial (Decoupled Cluster · Zero-CLI Web Control · Live Verification)](docs/TUTORIAL_EN.md)**  
+> - 🇯🇵 **[日本語詳細チュートリアル (分離クラスタ · 完全 Web 管理 · 実機検証)](docs/TUTORIAL_JA.md)**
+
+---
+
 ## 目录 / Table of Contents / 目次
 
+- [📚 三語保姆式圖文教程 / Tutorials / チュートリアル](#-三語保姆式圖文教程--step-by-step-tutorials--保守導入チュートリアル)
 - [🇹🇼 繁體中文說明 (Default Traditional Chinese)](#-繁體中文說明-default-traditional-chinese)
   - [🚀 v3.5.0 重大突破與核心特色](#-v350-重大突破與核心特色)
   - [💎 核心特性深入解析](#-核心特性深入解析)
@@ -48,6 +58,9 @@
 ## 🇹🇼 繁體中文說明 (Default Traditional Chinese)
 
 ### 🚀 v3.5.1 重大突破：全動態自適應網絡架構（Zero-Hardcoded IP）與旁路由集群解耦調度
+
+> [!TIP]
+> 📖 **新手推薦閱讀**：想要一步到位配置旁路由與 NAS 分離集群？請直接查閱 🇹🇼 **[繁體中文保姆式圖文教程](docs/TUTORIAL.md)**，內含手把手步驟、拓撲全景圖、Web UI 實機截圖與 Windows 11/antiX Linux 開機實測驗收！
 
 在最新發布的 **v3.5.1** 中，我們進一步實現了大規模網絡引導環境下的**控制面與數據面物理級分離**，徹底終結代碼與前端中任何寫死 IP 的痛點：
 
@@ -301,6 +314,9 @@ dhcp-boot=tag:efi64,ipxe.efi,,<旁路由IP>
 
 ### Overview & v3.5.1 Breakthroughs
 
+> [!TIP]
+> 📖 **Quick Start Guide**: Looking for an illustrated walkthrough on setting up decoupled edge clusters? Check out the 🇺🇸 **[English Step-by-Step Tutorial](docs/TUTORIAL_EN.md)** covering cluster setup, zero-CLI Web control, dynamic MAC bindings, and live Windows 11/antiX Linux verifications!
+
 `iventoymersed` is an ultra-lightweight, high-performance **dual-engine netboot server written in 100% Pure Rust (Tokio + Axum)**. In version **v3.5.1**, it achieves physical decoupling of control and data planes with a zero-hardcoded dynamic IP architecture:
 
 1. **Decoupled Cluster Architecture (Orchestrator vs Storage Node)**:
@@ -432,6 +448,9 @@ chmod +x iventoymersed
 ## 🇯🇵 日本語ドキュメント
 
 ### 概要および v3.5.1 の主要な進化点
+
+> [!TIP]
+> 📖 **導入ガイド**：傍受ルーターと NAS の分離クラスタ環境をすぐに構築したい方は、🇯🇵 **[日本語詳細チュートリアル](docs/TUTORIAL_JA.md)** をご覧ください。トポロジー解説、Web UI 実機画像、MAC/静的 IP 割り当て、Windows 11 / Linux 実機起動手順を網羅しています！
 
 `iventoymersed` は、Pure Rust（Tokio + Axum）で開発された**デュアルエンジン統合型ネットワークブート（PXE/Netboot）サーバー**です。最新の **v3.5.1** では、制御プレーンとデータプレーンの物理分離とゼロハードコード動的 IP アーキテクチャを確立しました：
 
