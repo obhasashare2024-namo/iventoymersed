@@ -75,6 +75,7 @@ async fn api_status(State(state): State<Arc<AppState>>) -> Response<Body> {
         default_win_mode: String,
         default_image: Option<String>,
         mac_bindings: HashMap<String, String>,
+        mac_ips: HashMap<String, String>,
         targets: std::collections::BTreeMap<String, TargetOut>,
     }
 
@@ -112,6 +113,7 @@ async fn api_status(State(state): State<Arc<AppState>>) -> Response<Body> {
         default_win_mode: cfg.json_cfg.windows_boot.default_mode,
         default_image: cfg.json_cfg.default_image,
         mac_bindings: cfg.json_cfg.mac_bindings,
+        mac_ips: cfg.json_cfg.mac_ips,
         targets,
     })
     .unwrap_or_else(|_| "{}".into());
@@ -124,7 +126,11 @@ async fn api_status(State(state): State<Arc<AppState>>) -> Response<Body> {
         .unwrap()
 }
 
-async fn serve_static(path: &str, is_head: bool, range: Option<&header::HeaderValue>) -> Response<Body> {
+async fn serve_static(
+    path: &str,
+    is_head: bool,
+    range: Option<&header::HeaderValue>,
+) -> Response<Body> {
     match tokio::fs::File::open(path).await {
         Ok(mut file) => {
             let meta = match file.metadata().await {
@@ -147,7 +153,9 @@ async fn serve_static(path: &str, is_head: bool, range: Option<&header::HeaderVa
                         let start = parts[0].parse::<u64>().ok();
                         let end = parts[1].parse::<u64>().ok();
                         if let Some(start_pos) = start {
-                            let end_pos = end.unwrap_or(len.saturating_sub(1)).min(len.saturating_sub(1));
+                            let end_pos = end
+                                .unwrap_or(len.saturating_sub(1))
+                                .min(len.saturating_sub(1));
                             if start_pos <= end_pos && start_pos < len {
                                 let chunk_len = end_pos - start_pos + 1;
                                 use tokio::io::{AsyncReadExt, AsyncSeekExt, SeekFrom};
@@ -159,7 +167,8 @@ async fn serve_static(path: &str, is_head: bool, range: Option<&header::HeaderVa
                                         match file.read_exact(&mut buf).await {
                                             Ok(_) => Body::from(buf),
                                             Err(_) => {
-                                                let stream = ReaderStream::new(file.take(chunk_len));
+                                                let stream =
+                                                    ReaderStream::new(file.take(chunk_len));
                                                 Body::from_stream(stream)
                                             }
                                         }
@@ -172,7 +181,10 @@ async fn serve_static(path: &str, is_head: bool, range: Option<&header::HeaderVa
                                         .status(StatusCode::PARTIAL_CONTENT)
                                         .header(header::CONTENT_TYPE, "application/octet-stream")
                                         .header(header::CONTENT_LENGTH, chunk_len)
-                                        .header(header::CONTENT_RANGE, format!("bytes {}-{}/{}", start_pos, end_pos, len))
+                                        .header(
+                                            header::CONTENT_RANGE,
+                                            format!("bytes {}-{}/{}", start_pos, end_pos, len),
+                                        )
                                         .header(header::ACCEPT_RANGES, "bytes")
                                         .header(header::CONNECTION, "keep-alive")
                                         .body(body)
@@ -238,7 +250,10 @@ async fn serve_static(path: &str, is_head: bool, range: Option<&header::HeaderVa
     }
 }
 
-async fn render_top_level_ipxe_menu(storage: &StorageManager, client_mac: Option<&str>) -> Response<Body> {
+async fn render_top_level_ipxe_menu(
+    storage: &StorageManager,
+    client_mac: Option<&str>,
+) -> Response<Body> {
     storage.scan_and_export().await;
     let script = storage.build_top_level_ipxe_menu(client_mac).await;
 
@@ -250,7 +265,10 @@ async fn render_top_level_ipxe_menu(storage: &StorageManager, client_mac: Option
         .unwrap()
 }
 
-async fn render_standalone_ipxe_menu(storage: &StorageManager, client_mac: Option<&str>) -> Response<Body> {
+async fn render_standalone_ipxe_menu(
+    storage: &StorageManager,
+    client_mac: Option<&str>,
+) -> Response<Body> {
     storage.scan_and_export().await;
     let script = storage.build_standalone_ipxe_menu(client_mac).await;
 
@@ -321,7 +339,10 @@ async fn top_level_ipxe_handler(
     req: Request,
 ) -> Response<Body> {
     let method = req.method().clone();
-    req_log(&client, &format!("{} /boot.ipxe (Top-Level Dual Engine)", method));
+    req_log(
+        &client,
+        &format!("{} /boot.ipxe (Top-Level Dual Engine)", method),
+    );
 
     let mac = params.get("mac").map(|s| s.as_str());
     if method == Method::GET {
@@ -349,7 +370,10 @@ async fn track_a_ipxe_handler(
     req: Request,
 ) -> Response<Body> {
     let method = req.method().clone();
-    req_log(&client, &format!("{} /ipxe/menu-a (Engine A Standalone)", method));
+    req_log(
+        &client,
+        &format!("{} /ipxe/menu-a (Engine A Standalone)", method),
+    );
 
     let mac = params.get("mac").map(|s| s.as_str());
     if method == Method::GET {
@@ -376,7 +400,10 @@ async fn track_b_grub_handler(
     req: Request,
 ) -> Response<Body> {
     let method = req.method().clone();
-    req_log(&client, &format!("{} /grub/grub.cfg (Engine B NetLoop)", method));
+    req_log(
+        &client,
+        &format!("{} /grub/grub.cfg (Engine B NetLoop)", method),
+    );
 
     state.storage.scan_and_export().await;
     let cfg_text = state.storage.build_netloop_grub_cfg().await;
@@ -409,7 +436,10 @@ async fn grub_core_handler() -> Response<Body> {
             }
         }
     }
-    Response::builder().status(StatusCode::NOT_FOUND).body(Body::from("core.0 not found")).unwrap()
+    Response::builder()
+        .status(StatusCode::NOT_FOUND)
+        .body(Body::from("core.0 not found"))
+        .unwrap()
 }
 
 async fn grub_efi_handler() -> Response<Body> {
@@ -430,7 +460,10 @@ async fn grub_efi_handler() -> Response<Body> {
             }
         }
     }
-    Response::builder().status(StatusCode::NOT_FOUND).body(Body::from("grubnet.efi not found")).unwrap()
+    Response::builder()
+        .status(StatusCode::NOT_FOUND)
+        .body(Body::from("grubnet.efi not found"))
+        .unwrap()
 }
 
 // Handlers for static boot files
@@ -442,7 +475,12 @@ async fn vmlinuz_handler(
     let method = req.method().clone();
     req_log(&client, &format!("{} /vtoy/vmlinuz", method));
     let cfg = state.storage.get_config().await;
-    serve_static(&cfg.kernel_path, method == Method::HEAD, req.headers().get(header::RANGE)).await
+    serve_static(
+        &cfg.kernel_path,
+        method == Method::HEAD,
+        req.headers().get(header::RANGE),
+    )
+    .await
 }
 
 async fn initramfs_handler(
@@ -453,7 +491,12 @@ async fn initramfs_handler(
     let method = req.method().clone();
     req_log(&client, &format!("{} /vtoy/initramfs.img", method));
     let cfg = state.storage.get_config().await;
-    serve_static(&cfg.initrd_path, method == Method::HEAD, req.headers().get(header::RANGE)).await
+    serve_static(
+        &cfg.initrd_path,
+        method == Method::HEAD,
+        req.headers().get(header::RANGE),
+    )
+    .await
 }
 
 async fn vtoy_overlay_handler(
@@ -465,7 +508,12 @@ async fn vtoy_overlay_handler(
     req_log(&client, &format!("{} /vtoy/vtoy_overlay.cpio", method));
     let cfg = state.storage.get_config().await;
     let overlay_path = format!("{}/vtoy_overlay.cpio", cfg.vtoy_dir);
-    serve_static(&overlay_path, method == Method::HEAD, req.headers().get(header::RANGE)).await
+    serve_static(
+        &overlay_path,
+        method == Method::HEAD,
+        req.headers().get(header::RANGE),
+    )
+    .await
 }
 
 async fn vtoy_bcd_handler(
@@ -476,7 +524,10 @@ async fn vtoy_bcd_handler(
     req_log(&client, &format!("GET /vtoy/bcd (params={:?})", params));
     if let Some(image_name) = params.get("image").or_else(|| params.get("target")) {
         let snapshot = state.storage.health_targets().await;
-        if let Some(target) = snapshot.iter().find(|t| &t.file == image_name || &t.id == image_name) {
+        if let Some(target) = snapshot
+            .iter()
+            .find(|t| &t.file == image_name || &t.id == image_name)
+        {
             match crate::bcd::generate_patched_bcd_for_image(&target.path) {
                 Ok((bcd_bytes, _, _)) => {
                     return Response::builder()
@@ -488,7 +539,10 @@ async fn vtoy_bcd_handler(
                         .unwrap();
                 }
                 Err(e) => {
-                    eprintln!("[server:bcd] Error generating BCD for {}: {}", target.path, e);
+                    eprintln!(
+                        "[server:bcd] Error generating BCD for {}: {}",
+                        target.path, e
+                    );
                 }
             }
         }
@@ -513,7 +567,12 @@ async fn iso_handler(
     req_log(&client, &format!("{} /iso/{}", method, file));
     let cfg = state.storage.get_config().await;
     let fullpath = format!("{}/{}", cfg.vtoy_dir, file);
-    serve_static(&fullpath, method == Method::HEAD, req.headers().get(header::RANGE)).await
+    serve_static(
+        &fullpath,
+        method == Method::HEAD,
+        req.headers().get(header::RANGE),
+    )
+    .await
 }
 
 async fn api_preview(State(state): State<Arc<AppState>>) -> Response<Body> {
@@ -588,6 +647,8 @@ struct MacBindingIn {
     mac: String,
     #[serde(default)]
     image: Option<String>,
+    #[serde(default)]
+    ip: Option<String>,
 }
 
 async fn api_add_mac_binding(
@@ -595,7 +656,11 @@ async fn api_add_mac_binding(
     axum::Json(payload): axum::Json<MacBindingIn>,
 ) -> Response<Body> {
     let img = payload.image.unwrap_or_default();
-    if let Err(e) = state.storage.set_mac_binding(payload.mac, img).await {
+    if let Err(e) = state
+        .storage
+        .set_mac_binding(payload.mac, img, payload.ip)
+        .await
+    {
         return Response::builder()
             .status(StatusCode::INTERNAL_SERVER_ERROR)
             .body(Body::from(e))
@@ -613,6 +678,44 @@ async fn api_remove_mac_binding(
     axum::Json(payload): axum::Json<MacBindingIn>,
 ) -> Response<Body> {
     if let Err(e) = state.storage.remove_mac_binding(&payload.mac).await {
+        return Response::builder()
+            .status(StatusCode::INTERNAL_SERVER_ERROR)
+            .body(Body::from(e))
+            .unwrap();
+    }
+    Response::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(r#"{"ok":true}"#))
+        .unwrap()
+}
+
+#[derive(Deserialize)]
+struct SetClusterIn {
+    role: String,
+    #[serde(default)]
+    storage_node: Option<String>,
+    #[serde(default)]
+    storage_port: Option<u16>,
+}
+
+async fn api_set_cluster(
+    State(state): State<Arc<AppState>>,
+    axum::Json(payload): axum::Json<SetClusterIn>,
+) -> Response<Body> {
+    let clean_node = payload.storage_node.and_then(|s| {
+        let t = s.trim().to_string();
+        if t.is_empty() {
+            None
+        } else {
+            Some(t)
+        }
+    });
+    if let Err(e) = state
+        .storage
+        .set_cluster_config(payload.role, clean_node, payload.storage_port)
+        .await
+    {
         return Response::builder()
             .status(StatusCode::INTERNAL_SERVER_ERROR)
             .body(Body::from(e))
@@ -648,6 +751,7 @@ pub fn make_app(state: Arc<AppState>) -> Router {
         .route("/api/rescan", post(api_rescan))
         .route("/api/config/default-win-mode", post(api_set_win_mode))
         .route("/api/config/default-image", post(api_set_default_image))
+        .route("/api/config/cluster", post(api_set_cluster))
         .route(
             "/api/config/mac-binding",
             post(api_add_mac_binding).delete(api_remove_mac_binding),

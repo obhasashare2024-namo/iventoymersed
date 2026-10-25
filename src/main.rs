@@ -168,7 +168,10 @@ async fn main() {
     let shutdown_state = state.clone();
     let shutdown = async move {
         wait_for_signal().await;
-        println!("\n[*] Shutting down {} (draining connections)...", env!("CARGO_PKG_NAME"));
+        println!(
+            "\n[*] Shutting down {} (draining connections)...",
+            env!("CARGO_PKG_NAME")
+        );
     };
 
     if let Err(e) = axum::serve(
@@ -243,7 +246,10 @@ async fn run_standalone_nbd(args: &[String]) {
         return;
     }
 
-    println!("[*] Starting iventoymersed In-Tree Pure Rust NBD Server (v{})", VERSION);
+    println!(
+        "[*] Starting iventoymersed In-Tree Pure Rust NBD Server (v{})",
+        VERSION
+    );
     println!("    Port:        {}", port);
     println!("    Export Name: {}", export_name);
     println!("    Base (RO):   {}", base_path);
@@ -254,13 +260,16 @@ async fn run_standalone_nbd(args: &[String]) {
     }
 
     let mut server = match diff_path {
-        Some(d) => match nbd_server::EmbeddedNbdServer::start_cow(port, &base_path, &d, &export_name).await {
-            Ok(s) => s,
-            Err(e) => {
-                eprintln!("[ERR] Failed to start COW NBD server: {}", e);
-                std::process::exit(1);
+        Some(d) => {
+            match nbd_server::EmbeddedNbdServer::start_cow(port, &base_path, &d, &export_name).await
+            {
+                Ok(s) => s,
+                Err(e) => {
+                    eprintln!("[ERR] Failed to start COW NBD server: {}", e);
+                    std::process::exit(1);
+                }
             }
-        },
+        }
         None => match nbd_server::EmbeddedNbdServer::start(port, &base_path, &export_name).await {
             Ok(s) => s,
             Err(e) => {
@@ -287,11 +296,22 @@ fn run_inspect(args: &[String]) {
             println!("    Has ESP (EFI):   {}", info.has_esp);
             println!("    Partition Count: {}", info.partitions.len());
             for p in &info.partitions {
-                println!("      [{}] Type: {} | Unique: {} | LBA: {}..{} | Name: '{}'",
-                         p.index, p.type_guid.to_string(), p.unique_guid.to_string(), p.start_lba, p.end_lba, p.name);
+                println!(
+                    "      [{}] Type: {} | Unique: {} | LBA: {}..{} | Name: '{}'",
+                    p.index,
+                    p.type_guid.to_string(),
+                    p.unique_guid.to_string(),
+                    p.start_lba,
+                    p.end_lba,
+                    p.name
+                );
             }
             if let Some(ref win) = info.windows_partition {
-                println!("    -> Detected Windows Partition: Index={}, Unique GUID={}", win.index, win.unique_guid.to_string());
+                println!(
+                    "    -> Detected Windows Partition: Index={}, Unique GUID={}",
+                    win.index,
+                    win.unique_guid.to_string()
+                );
             } else {
                 println!("    -> No Microsoft Basic Data partition detected.");
             }
@@ -320,14 +340,20 @@ fn run_patch_bcd(args: &[String]) {
         format!("{}_uefi.bcd", stem)
     };
 
-    println!("[*] Synthesizing patched BCD for '{}' -> '{}'...", image_path, out_path);
+    println!(
+        "[*] Synthesizing patched BCD for '{}' -> '{}'...",
+        image_path, out_path
+    );
     match bcd::generate_patched_bcd_for_image(image_path) {
         Ok((data, disk_guid, part_guid)) => {
             if let Err(e) = std::fs::write(&out_path, &data) {
                 eprintln!("[ERR] Failed to write output file '{}': {}", out_path, e);
                 std::process::exit(1);
             }
-            println!("[+] Successfully generated {} bytes patched BCD hive!", data.len());
+            println!(
+                "[+] Successfully generated {} bytes patched BCD hive!",
+                data.len()
+            );
             println!("    Target Disk GUID:      {}", disk_guid.to_string());
             println!("    Target Partition GUID: {}", part_guid.to_string());
             println!("    Output File:           {}", out_path);
@@ -353,7 +379,10 @@ fn run_nbd_client(args: &[String]) {
     let dev_path = &args[2];
     let export_name = if args.len() > 3 { &args[3] } else { "vtoy" };
 
-    println!("[nbd-client] Connecting to {}:{} for export '{}' -> {}...", host, port, export_name, dev_path);
+    println!(
+        "[nbd-client] Connecting to {}:{} for export '{}' -> {}...",
+        host, port, export_name, dev_path
+    );
 
     let mut stream = match TcpStream::connect((host.as_str(), port)) {
         Ok(s) => s,
@@ -371,7 +400,10 @@ fn run_nbd_client(args: &[String]) {
     let magic = u64::from_be_bytes(init[0..8].try_into().unwrap());
     let opts_magic = u64::from_be_bytes(init[8..16].try_into().unwrap());
     if magic != 0x4e42444d41474943 || opts_magic != 0x49484156454F5054 {
-        eprintln!("[nbd-client] Invalid NBD magic: {:x}/{:x}", magic, opts_magic);
+        eprintln!(
+            "[nbd-client] Invalid NBD magic: {:x}/{:x}",
+            magic, opts_magic
+        );
         std::process::exit(1);
     }
 
@@ -399,9 +431,17 @@ fn run_nbd_client(args: &[String]) {
     }
     let export_size = u64::from_be_bytes(rep[0..8].try_into().unwrap());
     let flags = u16::from_be_bytes(rep[8..10].try_into().unwrap());
-    println!("[nbd-client] Connected! Export size: {} MB, Flags: 0x{:04x}", export_size / (1024 * 1024), flags);
+    println!(
+        "[nbd-client] Connected! Export size: {} MB, Flags: 0x{:04x}",
+        export_size / (1024 * 1024),
+        flags
+    );
 
-    let nbd_file = match std::fs::OpenOptions::new().read(true).write(true).open(dev_path) {
+    let nbd_file = match std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(dev_path)
+    {
         Ok(f) => f,
         Err(e) => {
             eprintln!("[nbd-client] Failed to open {}: {}", dev_path, e);
@@ -428,6 +468,3 @@ fn run_nbd_client(args: &[String]) {
     }
     println!("[nbd-client] Disconnected from {}.", dev_path);
 }
-
-
-

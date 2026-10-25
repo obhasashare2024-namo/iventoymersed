@@ -487,7 +487,7 @@
     </header>
 
     <!-- Architecture & Topology Banner -->
-    <div class="card" style="padding: 16px 20px; border-left: 4px solid var(--accent-cyan);">
+    <div class="card" style="padding: 18px 20px; border-left: 4px solid var(--accent-cyan);">
       <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px;">
         <div style="display: flex; align-items: center; gap: 12px;">
           <div style="font-size: 26px;">🌐</div>
@@ -511,6 +511,20 @@
             🚀 純 Rust 引擎: <strong style="color: var(--accent-cyan);">VHDX/VMDK/QCOW2/VDI/RAW</strong>
           </span>
         </div>
+      </div>
+
+      <!-- Interactive Side Router & Storage Node IP Settings -->
+      <div style="margin-top: 14px; padding-top: 14px; border-top: 1px solid rgba(255,255,255,0.07); display: flex; flex-wrap: wrap; gap: 12px; align-items: center;">
+        <span style="font-size: 12px; font-weight: 600; color: var(--text-dim); min-width: 90px;">⚙️ 旁路由配置:</span>
+        <select id="cfg-role" class="select-field" style="width: auto; min-width: 220px;">
+          <option value="orchestrator">🚀 旁路由調度大腦 (Orchestrator)</option>
+          <option value="standalone">💾 獨立單機模式 (Standalone)</option>
+          <option value="storage">📦 數據存儲節點 (Storage Node)</option>
+        </select>
+        <input type="text" id="cfg-storage-node" class="input-field" placeholder="遠端數據節點 IP (留空自適應)" style="width: 220px;">
+        <input type="number" id="cfg-storage-port" class="input-field" placeholder="端口: 26001" style="width: 110px;">
+        <button class="btn btn-primary" onclick="saveClusterConfig()">💾 儲存並即時切換</button>
+        <button class="btn btn-sm" onclick="resetStorageNode()">🔄 清空設為自適應</button>
       </div>
     </div>
 
@@ -596,17 +610,18 @@
         <div class="card-header">
           <div class="card-title">
             <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"></path></svg>
-            客戶端 MAC 預選綁定 (Client MAC Binding)
+            客戶端 MAC & IP 預選綁定 (Client MAC & IP Binding)
           </div>
         </div>
         <p style="font-size: 12px; color: var(--text-dim);">
-          當特定主機開機時，若匹配其網卡 MAC 地址，客戶端屏幕將自動將指定系統設為高亮默認引導：
+          當特定主機開機時，若匹配其網卡 MAC 地址，客戶端屏幕將自動預選專屬鏡像，並可指定專屬客戶端 IP：
         </p>
-        <div class="form-row">
-          <input type="text" id="mac-input" class="input-field" placeholder="00:1a:2b:3c:4d:5e">
-          <select id="image-select" class="select-field">
-            <option value="">選擇鏡像...</option>
+        <div class="form-row" style="flex-wrap: wrap;">
+          <input type="text" id="mac-input" class="input-field" placeholder="MAC: 00:1a:2b:3c:4d:5e" style="flex: 1.2; min-width: 170px;">
+          <select id="image-select" class="select-field" style="flex: 1.5; min-width: 180px;">
+            <option value="">選擇目標鏡像...</option>
           </select>
+          <input type="text" id="ip-input" class="input-field" placeholder="指定客戶端 IP (選填)" style="flex: 1.2; min-width: 150px;">
           <button class="btn btn-primary" onclick="addMacBinding()">綁定</button>
         </div>
         <div class="table-container" style="margin-top: 10px;">
@@ -615,11 +630,12 @@
               <tr>
                 <th>MAC 地址</th>
                 <th>綁定啟動鏡像</th>
+                <th>指定靜態 IP</th>
                 <th>操作</th>
               </tr>
             </thead>
             <tbody id="mac-tbody">
-              <tr><td colspan="3" style="text-align: center; color: var(--text-muted); font-size: 11px;">暫無特定 MAC 綁定</td></tr>
+              <tr><td colspan="4" style="text-align: center; color: var(--text-muted); font-size: 11px;">暫無特定 MAC 綁定</td></tr>
             </tbody>
           </table>
         </div>
@@ -698,12 +714,26 @@
         document.getElementById("box-iscsi").classList.toggle("active", winMode === "iscsi");
         document.getElementById("box-http").classList.toggle("active", winMode === "http" || winMode === "vtoyboot");
 
+        // Sync Cluster Inputs if not focused
+        const snInput = document.getElementById("cfg-storage-node");
+        const spInput = document.getElementById("cfg-storage-port");
+        const roleInput = document.getElementById("cfg-role");
+        if (snInput && !snInput.matches(":focus")) {
+          snInput.value = data.storage_node || "";
+        }
+        if (spInput && !spInput.matches(":focus")) {
+          spInput.value = data.storage_port || "";
+        }
+        if (roleInput && !roleInput.matches(":focus")) {
+          roleInput.value = data.role || "standalone";
+        }
+
         // Images Table
         renderImagesTable(currentTargets, data.default_image);
         updateImageSelect(currentTargets);
 
         // MAC Bindings
-        renderMacBindings(data.mac_bindings || {});
+        renderMacBindings(data.mac_bindings || {}, data.mac_ips || {});
 
         // iPXE Preview
         fetchPreview();
@@ -765,25 +795,55 @@
       if (currentVal) sel.value = currentVal;
     }
 
-    function renderMacBindings(bindings) {
+    function renderMacBindings(bindings, ips) {
       const tbody = document.getElementById("mac-tbody");
-      const keys = Object.keys(bindings);
+      const keys = Object.keys(bindings || {});
       if (keys.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="3" style="text-align: center; color: var(--text-muted); font-size: 11px;">暫無特定 MAC 綁定</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="4" style="text-align: center; color: var(--text-muted); font-size: 11px;">暫無特定 MAC 綁定</td></tr>';
         return;
       }
       let html = "";
       for (const mac of keys) {
         const img = bindings[mac];
+        const ip = (ips && ips[mac]) ? ips[mac] : '<span style="color: var(--text-muted);">DHCP 自動分配</span>';
         html += `
           <tr>
             <td style="font-family: var(--mono); color: var(--accent-cyan); font-weight: 600;">${mac}</td>
             <td>${img}</td>
+            <td style="font-family: var(--mono); color: var(--accent-emerald); font-weight: 600;">${ip}</td>
             <td><button class="btn btn-sm" style="color: var(--accent-rose);" onclick="removeMac('${mac}')">解綁</button></td>
           </tr>
         `;
       }
       tbody.innerHTML = html;
+    }
+
+    async function saveClusterConfig() {
+      const role = document.getElementById("cfg-role").value;
+      const node = document.getElementById("cfg-storage-node").value.trim();
+      const portRaw = document.getElementById("cfg-storage-port").value.trim();
+      const port = portRaw ? parseInt(portRaw, 10) : null;
+      try {
+        const res = await fetch("/api/config/cluster", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ role, storage_node: node || null, storage_port: port })
+        });
+        if (res.ok) {
+          showToast(`已切換為 [${role.toUpperCase()}] 模式 · 存儲節點: ${node || "動態自適應"}`);
+          fetchStatus();
+        } else {
+          alert("設定失敗: " + await res.text());
+        }
+      } catch (e) {
+        alert("設定異常: " + e);
+      }
+    }
+
+    function resetStorageNode() {
+      document.getElementById("cfg-storage-node").value = "";
+      document.getElementById("cfg-storage-port").value = "";
+      saveClusterConfig();
     }
 
     async function fetchPreview() {
@@ -827,16 +887,18 @@
     async function addMacBinding() {
       const mac = document.getElementById("mac-input").value.trim();
       const image = document.getElementById("image-select").value;
+      const ip = document.getElementById("ip-input").value.trim();
       if (!mac || !image) { alert("請輸入 MAC 地址並選擇目標鏡像"); return; }
       try {
         const res = await fetch("/api/config/mac-binding", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ mac, image })
+          body: JSON.stringify({ mac, image, ip: ip || null })
         });
         if (res.ok) {
-          showToast(`已綁定 MAC ${mac} -> ${image}`);
+          showToast(`已綁定 MAC ${mac} -> ${image} ${ip ? `(IP: ${ip})` : ""}`);
           document.getElementById("mac-input").value = "";
+          document.getElementById("ip-input").value = "";
           fetchStatus();
         }
       } catch (e) { alert("綁定失敗: " + e); }

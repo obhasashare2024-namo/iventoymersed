@@ -122,10 +122,37 @@ impl StorageManager {
         crate::config::save_iventoy_json(&cfg.vtoy_dir, &cfg.json_cfg)
     }
 
-    pub async fn set_mac_binding(&self, mac: String, img: String) -> Result<(), String> {
+    pub async fn set_cluster_config(
+        &self,
+        role: String,
+        storage_node: Option<String>,
+        storage_port: Option<u16>,
+    ) -> Result<(), String> {
+        let mut cfg = self.config.write().await;
+        let role_clean = role.trim().to_ascii_lowercase();
+        cfg.role = role_clean.clone();
+        cfg.storage_node = storage_node.clone();
+        cfg.storage_port = storage_port;
+        cfg.json_cfg.role = Some(role_clean);
+        cfg.json_cfg.storage_node = storage_node;
+        cfg.json_cfg.storage_port = storage_port;
+        crate::config::save_iventoy_json(&cfg.vtoy_dir, &cfg.json_cfg)
+    }
+
+    pub async fn set_mac_binding(
+        &self,
+        mac: String,
+        img: String,
+        ip: Option<String>,
+    ) -> Result<(), String> {
         let mut cfg = self.config.write().await;
         let clean_mac = mac.trim().to_ascii_lowercase().replace('-', ":");
-        cfg.json_cfg.mac_bindings.insert(clean_mac, img);
+        cfg.json_cfg.mac_bindings.insert(clean_mac.clone(), img);
+        if let Some(clean_ip) = ip.map(|s| s.trim().to_string()).filter(|s| !s.is_empty()) {
+            cfg.json_cfg.mac_ips.insert(clean_mac, clean_ip);
+        } else {
+            cfg.json_cfg.mac_ips.remove(&clean_mac);
+        }
         crate::config::save_iventoy_json(&cfg.vtoy_dir, &cfg.json_cfg)
     }
 
@@ -133,6 +160,7 @@ impl StorageManager {
         let mut cfg = self.config.write().await;
         let clean_mac = mac.trim().to_ascii_lowercase().replace('-', ":");
         cfg.json_cfg.mac_bindings.remove(&clean_mac);
+        cfg.json_cfg.mac_ips.remove(&clean_mac);
         crate::config::save_iventoy_json(&cfg.vtoy_dir, &cfg.json_cfg)
     }
 
@@ -159,27 +187,62 @@ impl StorageManager {
     }
 
     async fn export_iscsi(&self, tid: u32, iqn: &str, path: &str) {
-        log(&format!("Exporting iSCSI: TID={} IQN={} Backing={}", tid, iqn, path));
+        log(&format!(
+            "Exporting iSCSI: TID={} IQN={} Backing={}",
+            tid, iqn, path
+        ));
         run_cmd(&[
-            "tgtadm", "--lld", "iscsi", "--op", "new", "--mode", "target",
-            "--tid", &tid.to_string(), "-T", iqn,
+            "tgtadm",
+            "--lld",
+            "iscsi",
+            "--op",
+            "new",
+            "--mode",
+            "target",
+            "--tid",
+            &tid.to_string(),
+            "-T",
+            iqn,
         ])
         .await;
         run_cmd(&[
-            "tgtadm", "--lld", "iscsi", "--op", "new", "--mode", "logicalunit",
-            "--tid", &tid.to_string(), "--lun", "1", "-b", path,
+            "tgtadm",
+            "--lld",
+            "iscsi",
+            "--op",
+            "new",
+            "--mode",
+            "logicalunit",
+            "--tid",
+            &tid.to_string(),
+            "--lun",
+            "1",
+            "-b",
+            path,
         ])
         .await;
         run_cmd(&[
-            "tgtadm", "--lld", "iscsi", "--op", "bind", "--mode", "target",
-            "--tid", &tid.to_string(), "-I", "ALL",
+            "tgtadm",
+            "--lld",
+            "iscsi",
+            "--op",
+            "bind",
+            "--mode",
+            "target",
+            "--tid",
+            &tid.to_string(),
+            "-I",
+            "ALL",
         ])
         .await;
     }
 
     async fn export_qemu_nbd(&self, port: u16, path: &str, fmt: DiskFormat) -> Option<Child> {
         let fmt_arg = fmt.as_qemu_arg();
-        log(&format!("Exporting via qemu-nbd on port {}: Backing={} (format={})", port, path, fmt_arg));
+        log(&format!(
+            "Exporting via qemu-nbd on port {}: Backing={} (format={})",
+            port, path, fmt_arg
+        ));
         let mut cmd = Command::new("qemu-nbd");
         cmd.arg("-t")
             .arg("-e")
@@ -197,7 +260,11 @@ impl StorageManager {
 
         match cmd.spawn() {
             Ok(child) => {
-                log(&format!("Spawned qemu-nbd PID={:?} on port {}", child.id(), port));
+                log(&format!(
+                    "Spawned qemu-nbd PID={:?} on port {}",
+                    child.id(),
+                    port
+                ));
                 Some(child)
             }
             Err(e) => {
@@ -207,8 +274,20 @@ impl StorageManager {
         }
     }
 
-    async fn export_nbd(&self, port: u16, path: &str, fmt: DiskFormat) -> (Option<NbdBackend>, String) {
-        if fmt == DiskFormat::Raw || fmt == DiskFormat::Iso || fmt == DiskFormat::Vhdx || fmt == DiskFormat::Vmdk || fmt == DiskFormat::Vdi || fmt == DiskFormat::Qcow2 || fmt == DiskFormat::Vpc {
+    async fn export_nbd(
+        &self,
+        port: u16,
+        path: &str,
+        fmt: DiskFormat,
+    ) -> (Option<NbdBackend>, String) {
+        if fmt == DiskFormat::Raw
+            || fmt == DiskFormat::Iso
+            || fmt == DiskFormat::Vhdx
+            || fmt == DiskFormat::Vmdk
+            || fmt == DiskFormat::Vdi
+            || fmt == DiskFormat::Qcow2
+            || fmt == DiskFormat::Vpc
+        {
             let diff_opt = std::env::var("COW_DIR").ok().map(|dir| {
                 let p = std::path::Path::new(path);
                 let fname = p.file_name().and_then(|s| s.to_str()).unwrap_or("disk");
@@ -227,12 +306,21 @@ impl StorageManager {
 
             if let Some(ref diff_path) = diff_opt {
                 log(&format!("Exporting via In-Tree Pure Rust NBD Server (COW .diff) on port {}: Backing={}, Diff={}", port, path, diff_path));
-                match crate::nbd_server::EmbeddedNbdServer::start_cow(port, path, diff_path, "vtoy").await {
-                    Ok(srv) => (Some(NbdBackend::Embedded(srv)), "in-tree-rust-nbd-cow".to_string()),
+                match crate::nbd_server::EmbeddedNbdServer::start_cow(port, path, diff_path, "vtoy")
+                    .await
+                {
+                    Ok(srv) => (
+                        Some(NbdBackend::Embedded(srv)),
+                        "in-tree-rust-nbd-cow".to_string(),
+                    ),
                     Err(e) => {
                         eprintln!("[ERR] Failed to start In-Tree NBD server with COW on port {}: {}. Falling back to direct raw.", port, e);
-                        match crate::nbd_server::EmbeddedNbdServer::start(port, path, "vtoy").await {
-                            Ok(srv) => (Some(NbdBackend::Embedded(srv)), "in-tree-rust-nbd".to_string()),
+                        match crate::nbd_server::EmbeddedNbdServer::start(port, path, "vtoy").await
+                        {
+                            Ok(srv) => (
+                                Some(NbdBackend::Embedded(srv)),
+                                "in-tree-rust-nbd".to_string(),
+                            ),
                             Err(e2) => {
                                 eprintln!("[ERR] Direct start also failed: {}.", e2);
                                 (None, "failed".to_string())
@@ -241,9 +329,15 @@ impl StorageManager {
                     }
                 }
             } else {
-                log(&format!("Exporting via In-Tree Pure Rust NBD Server on port {}: Backing={}", port, path));
+                log(&format!(
+                    "Exporting via In-Tree Pure Rust NBD Server on port {}: Backing={}",
+                    port, path
+                ));
                 match crate::nbd_server::EmbeddedNbdServer::start(port, path, "vtoy").await {
-                    Ok(srv) => (Some(NbdBackend::Embedded(srv)), "in-tree-rust-nbd".to_string()),
+                    Ok(srv) => (
+                        Some(NbdBackend::Embedded(srv)),
+                        "in-tree-rust-nbd".to_string(),
+                    ),
                     Err(e) => {
                         eprintln!("[ERR] Failed to start In-Tree NBD server on port {}: {}. Falling back to qemu-nbd.", port, e);
                         let c = self.export_qemu_nbd(port, path, fmt).await;
@@ -261,18 +355,26 @@ impl StorageManager {
         log(&format!("Unexporting iSCSI TID={}", tid));
         let t = tid.to_string();
         run_cmd(&[
-            "tgtadm", "--lld", "iscsi", "--op", "unbind", "--mode", "target",
-            "--tid", &t, "-I", "ALL",
+            "tgtadm", "--lld", "iscsi", "--op", "unbind", "--mode", "target", "--tid", &t, "-I",
+            "ALL",
         ])
         .await;
         run_cmd(&[
-            "tgtadm", "--lld", "iscsi", "--op", "delete", "--mode", "logicalunit",
-            "--tid", &t, "--lun", "1",
+            "tgtadm",
+            "--lld",
+            "iscsi",
+            "--op",
+            "delete",
+            "--mode",
+            "logicalunit",
+            "--tid",
+            &t,
+            "--lun",
+            "1",
         ])
         .await;
         run_cmd(&[
-            "tgtadm", "--lld", "iscsi", "--op", "delete", "--mode", "target",
-            "--tid", &t,
+            "tgtadm", "--lld", "iscsi", "--op", "delete", "--mode", "target", "--tid", &t,
         ])
         .await;
     }
@@ -305,7 +407,12 @@ impl StorageManager {
     pub async fn scan_and_export(&self) {
         let (vtoy_dir, iqn_prefix, boot_mode, json_cfg) = {
             let cfg = self.config.read().await;
-            (cfg.vtoy_dir.clone(), cfg.iqn_prefix.clone(), cfg.boot_mode, cfg.json_cfg.clone())
+            (
+                cfg.vtoy_dir.clone(),
+                cfg.iqn_prefix.clone(),
+                cfg.boot_mode,
+                cfg.json_cfg.clone(),
+            )
         };
 
         if !tokio::fs::metadata(&vtoy_dir).await.is_ok() {
@@ -348,7 +455,7 @@ impl StorageManager {
                 let port = self.alloc_port().await;
                 let iqn = format!("{}:{}", iqn_prefix, sanitize_iscsi_iqn_key(&vtoy_id));
                 let partitioned = has_partition_table(&fullpath).await;
-                
+
                 // Allow manual override from iventoy.json images config
                 let mut root_dev = if partitioned {
                     if filename.contains("anitix") {
@@ -365,7 +472,10 @@ impl StorageManager {
                         if f.as_str() == Some(&filename) {
                             if let Some(r_str) = r.as_str() {
                                 root_dev = r_str.to_string();
-                                println!("[config] Overriding root_dev for {} -> {}", filename, root_dev);
+                                println!(
+                                    "[config] Overriding root_dev for {} -> {}",
+                                    filename, root_dev
+                                );
                             }
                         }
                     }
@@ -376,7 +486,12 @@ impl StorageManager {
 
                 if is_win {
                     if let Ok(Some(gpt)) = crate::bcd::inspect_disk_gpt(&fullpath) {
-                        log(&format!("[gpt] Windows image '{}': Disk GUID={}, ESP present={}", filename, gpt.disk_guid.to_string(), gpt.has_esp));
+                        log(&format!(
+                            "[gpt] Windows image '{}': Disk GUID={}, ESP present={}",
+                            filename,
+                            gpt.disk_guid.to_string(),
+                            gpt.has_esp
+                        ));
                         if !gpt.has_esp {
                             if let Some(ref w_part) = gpt.windows_partition {
                                 log(&format!("[gpt] Target lacks ESP partition. Windows Part GUID={}. Dynamic BCD generator ready.", w_part.unique_guid.to_string()));
@@ -385,11 +500,12 @@ impl StorageManager {
                     }
                 }
 
-                let (backend, b_type) = if !is_win || fmt == DiskFormat::Vhdx || boot_mode == BootMode::Nbd {
-                    self.export_nbd(port, &fullpath, fmt).await
-                } else {
-                    (None, "iscsi-ibft".to_string())
-                };
+                let (backend, b_type) =
+                    if !is_win || fmt == DiskFormat::Vhdx || boot_mode == BootMode::Nbd {
+                        self.export_nbd(port, &fullpath, fmt).await
+                    } else {
+                        (None, "iscsi-ibft".to_string())
+                    };
 
                 let info = TargetInfo {
                     id: vtoy_id.clone(),
@@ -422,7 +538,10 @@ impl StorageManager {
                     };
                     if need_respawn {
                         let port = t.info.nbd_port;
-                        log(&format!("External qemu-nbd died, respawning on port {}", port));
+                        log(&format!(
+                            "External qemu-nbd died, respawning on port {}",
+                            port
+                        ));
                         let path = t.info.path.clone();
                         let fmt = detect_disk_format(&path).await;
                         let (b, bt) = self.export_nbd(port, &path, fmt).await;
@@ -481,10 +600,11 @@ impl StorageManager {
         let cfg = self.config.read().await.clone();
         let win_cfg = &cfg.json_cfg.windows_boot;
 
-        let storage_node = cfg.storage_node.clone()
+        let storage_node = cfg
+            .storage_node
+            .clone()
             .unwrap_or_else(|| "${next-server}".to_string());
-        let storage_http_port = cfg.storage_port
-            .unwrap_or(cfg.bridge_port);
+        let storage_http_port = cfg.storage_port.unwrap_or(cfg.bridge_port);
 
         let mut script = String::new();
 
@@ -499,46 +619,63 @@ impl StorageManager {
 
         // Determine default item based on MAC binding -> global default -> first item
         let clean_mac = client_mac.map(|m| m.trim().to_ascii_lowercase().replace('-', ":"));
-        let mac_matched_image = clean_mac.as_ref().and_then(|m| cfg.json_cfg.mac_bindings.get(m));
+        if let Some(ref mac) = clean_mac {
+            if let Some(ip) = cfg.json_cfg.mac_ips.get(mac) {
+                script.push_str(&format!(
+                    "# Static IP binding configured for MAC {}\nset ip {}\n\n",
+                    mac, ip
+                ));
+            }
+        }
+
+        let mac_matched_image = clean_mac
+            .as_ref()
+            .and_then(|m| cfg.json_cfg.mac_bindings.get(m));
 
         let default_item = if let Some(target_file) = mac_matched_image {
             // Find target by file name
-            snapshot.iter().find(|i| &i.file == target_file)
-                .map(|i| {
-                    if i.is_windows {
-                        format!("win_menu_{}", sanitize_ipxe_key(&i.id))
-                    } else if i.file.to_ascii_lowercase().ends_with(".iso") {
-                        format!("iso_{}", sanitize_ipxe_key(&i.id))
-                    } else {
-                        format!("vdisk_{}", sanitize_ipxe_key(&i.id))
-                    }
-                })
+            snapshot.iter().find(|i| &i.file == target_file).map(|i| {
+                if i.is_windows {
+                    format!("win_menu_{}", sanitize_ipxe_key(&i.id))
+                } else if i.file.to_ascii_lowercase().ends_with(".iso") {
+                    format!("iso_{}", sanitize_ipxe_key(&i.id))
+                } else {
+                    format!("vdisk_{}", sanitize_ipxe_key(&i.id))
+                }
+            })
         } else if let Some(ref def_img) = cfg.json_cfg.default_image {
-            snapshot.iter().find(|i| &i.file == def_img)
-                .map(|i| {
-                    if i.is_windows {
-                        format!("win_menu_{}", sanitize_ipxe_key(&i.id))
-                    } else if i.file.to_ascii_lowercase().ends_with(".iso") {
-                        format!("iso_{}", sanitize_ipxe_key(&i.id))
-                    } else {
-                        format!("vdisk_{}", sanitize_ipxe_key(&i.id))
-                    }
-                })
+            snapshot.iter().find(|i| &i.file == def_img).map(|i| {
+                if i.is_windows {
+                    format!("win_menu_{}", sanitize_ipxe_key(&i.id))
+                } else if i.file.to_ascii_lowercase().ends_with(".iso") {
+                    format!("iso_{}", sanitize_ipxe_key(&i.id))
+                } else {
+                    format!("vdisk_{}", sanitize_ipxe_key(&i.id))
+                }
+            })
         } else {
             None
         };
 
         let final_default = default_item.unwrap_or_else(|| {
-            snapshot.iter().find(|i| i.is_windows)
+            snapshot
+                .iter()
+                .find(|i| i.is_windows)
                 .map(|i| format!("win_menu_{}", sanitize_ipxe_key(&i.id)))
-                .or_else(|| snapshot.first().map(|i| format!("vdisk_{}", sanitize_ipxe_key(&i.id))))
+                .or_else(|| {
+                    snapshot
+                        .first()
+                        .map(|i| format!("vdisk_{}", sanitize_ipxe_key(&i.id)))
+                })
                 .unwrap_or_else(|| "shell".into())
         });
 
         script.push_str(&format!("set menu-default {}\n\n", final_default));
 
         script.push_str(":start\n");
-        script.push_str("menu iVentoy-Rust Network Boot Menu (Arrow keys to navigate, Enter to boot)\n\n");
+        script.push_str(
+            "menu iVentoy-Rust Network Boot Menu (Arrow keys to navigate, Enter to boot)\n\n",
+        );
 
         let mut win_items = Vec::new();
         let mut vdisk_items = Vec::new();
@@ -553,18 +690,31 @@ impl StorageManager {
             if info.is_windows {
                 // Windows Ventoy-style Submenu Item on Main Menu
                 let menu_key = format!("win_menu_{}", safe_id);
-                win_items.push(format!("item {} [WIN] {} (Press Enter for Boot Modes)", menu_key, label));
+                win_items.push(format!(
+                    "item {} [WIN] {} (Press Enter for Boot Modes)",
+                    menu_key, label
+                ));
 
                 let iscsi_key = format!("win_iscsi_{}", safe_id);
                 let http_key = format!("win_http_{}", safe_id);
-                let preferred_win_key = if win_cfg.default_mode == "http" { &http_key } else { &iscsi_key };
+                let preferred_win_key = if win_cfg.default_mode == "http" {
+                    &http_key
+                } else {
+                    &iscsi_key
+                };
 
                 // Build Ventoy-style Submenu block
                 let mut sm = String::new();
                 sm.push_str(&format!(":{}\n", menu_key));
                 sm.push_str(&format!("menu Select Boot Mode for {}:\n", label));
-                sm.push_str(&format!("item {} [1] Native iSCSI / iBFT SANBOOT (Fastest, zero driver change)\n", iscsi_key));
-                sm.push_str(&format!("item {} [2] HTTP Range Direct SANBOOT (HTTP 206 protocol)\n", http_key));
+                sm.push_str(&format!(
+                    "item {} [1] Native iSCSI / iBFT SANBOOT (Fastest, zero driver change)\n",
+                    iscsi_key
+                ));
+                sm.push_str(&format!(
+                    "item {} [2] HTTP Range Direct SANBOOT (HTTP 206 protocol)\n",
+                    http_key
+                ));
                 sm.push_str("item start               [3] <-- Back to Main Menu\n\n");
                 sm.push_str(&format!("choose --timeout ${{submenu-timeout}} --default {} win_choice_{} || goto start\n", preferred_win_key, safe_id));
                 sm.push_str(&format!("goto ${{win_choice_{}}}\n", safe_id));
@@ -591,7 +741,12 @@ impl StorageManager {
                 ));
             } else {
                 let item_key = format!("vdisk_{}", safe_id);
-                vdisk_items.push(format!("item {} [{}] {}", item_key, info.format.to_uppercase(), label));
+                vdisk_items.push(format!(
+                    "item {} [{}] {}",
+                    item_key,
+                    info.format.to_uppercase(),
+                    label
+                ));
 
                 handlers.push(format!(
                     ":{}\necho Booting {} via Pure Rust NBD (Port {}, Root {}) ...\nkernel {} initrd=initramfs.img console=ttyS0 console=tty0 ip=dhcp nbdroot={} nbdport={} nbdmaxpart=16 root={} rw nosplash verbose\ninitrd {}\nboot || goto boot_failed\n",
@@ -601,32 +756,42 @@ impl StorageManager {
         }
 
         if !win_items.is_empty() {
-            script.push_str("item --gap -- ==================== Windows Systems ====================\n");
+            script.push_str(
+                "item --gap -- ==================== Windows Systems ====================\n",
+            );
             for it in win_items {
                 script.push_str(&format!("{}\n", it));
             }
         }
 
         if !vdisk_items.is_empty() {
-            script.push_str("\nitem --gap -- ==================== Linux & Virtual Disks ==============\n");
+            script.push_str(
+                "\nitem --gap -- ==================== Linux & Virtual Disks ==============\n",
+            );
             for it in vdisk_items {
                 script.push_str(&format!("{}\n", it));
             }
         }
 
         if !iso_items.is_empty() {
-            script.push_str("\nitem --gap -- ==================== ISO Direct Install =================\n");
+            script.push_str(
+                "\nitem --gap -- ==================== ISO Direct Install =================\n",
+            );
             for it in iso_items {
                 script.push_str(&format!("{}\n", it));
             }
         }
 
-        script.push_str("\nitem --gap -- ==================== Operations & Tools =================\n");
+        script.push_str(
+            "\nitem --gap -- ==================== Operations & Tools =================\n",
+        );
         script.push_str("item shell  Drop into iPXE Shell\n");
         script.push_str("item reboot Reboot Computer\n");
         script.push_str("item exit   Exit to Local BIOS/UEFI\n\n");
 
-        script.push_str("choose --timeout ${menu-timeout} --default ${menu-default} selected || goto shell\n");
+        script.push_str(
+            "choose --timeout ${menu-timeout} --default ${menu-default} selected || goto shell\n",
+        );
         script.push_str("goto ${selected}\n\n");
 
         script.push_str(":shell\nshell\n\n:reboot\nreboot\n\n:exit\nexit\n\n");
@@ -648,7 +813,7 @@ impl StorageManager {
     }
 
     /// Builds the top-level unified OS boot menu (eliminating dual-engine selector delay)
-    pub async fn build_top_level_ipxe_menu(&self, _client_mac: Option<&str>) -> String {
+    pub async fn build_top_level_ipxe_menu(&self, client_mac: Option<&str>) -> String {
         let cfg = self.config.read().await;
         let port = cfg.bridge_port;
         let storage_port = cfg.storage_port.unwrap_or(port);
@@ -667,14 +832,82 @@ impl StorageManager {
 
         script.push_str("set menu-timeout 5000\n");
         script.push_str(&format!("isset ${{srv}} || set srv {}\n", srv_default));
-        script.push_str("isset ${menu-default} || set menu-default win_iscsi_win8_golden_img\n\n");
+
+        let clean_mac = client_mac.map(|m| m.trim().to_ascii_lowercase().replace('-', ":"));
+
+        // Static IP binding logic
+        if let Some(ref mac) = clean_mac {
+            if let Some(ip) = cfg.json_cfg.mac_ips.get(mac) {
+                script.push_str(&format!(
+                    "# Static IP binding configured for client MAC {}\nset ip {}\n\n",
+                    mac, ip
+                ));
+            }
+        } else if !cfg.json_cfg.mac_ips.is_empty() {
+            script.push_str("# Dynamic Client Static IP overrides\n");
+            for (mac, ip) in &cfg.json_cfg.mac_ips {
+                script.push_str(&format!(
+                    "iseq ${{net0/mac}} {} && set ip {} ||\n",
+                    mac.to_ascii_lowercase(),
+                    ip
+                ));
+            }
+            script.push_str("\n");
+        }
+
+        // Determine default item
+        let mut preferred_default = "shell".to_string();
+        if let Some(ref mac) = clean_mac {
+            if let Some(target_file) = cfg.json_cfg.mac_bindings.get(mac) {
+                if let Some(item) = snapshot.iter().find(|i| &i.file == target_file) {
+                    let safe_id = sanitize_ipxe_key(&item.id);
+                    preferred_default = if item.is_windows {
+                        format!("win_iscsi_{}", safe_id)
+                    } else if item.file.to_ascii_lowercase().ends_with(".iso") {
+                        format!("iso_iscsi_{}", safe_id)
+                    } else {
+                        format!("vdisk_{}", safe_id)
+                    };
+                }
+            }
+        }
+        if preferred_default == "shell" {
+            if let Some(ref def_img) = cfg.json_cfg.default_image {
+                if let Some(item) = snapshot.iter().find(|i| &i.file == def_img) {
+                    let safe_id = sanitize_ipxe_key(&item.id);
+                    preferred_default = if item.is_windows {
+                        format!("win_iscsi_{}", safe_id)
+                    } else if item.file.to_ascii_lowercase().ends_with(".iso") {
+                        format!("iso_iscsi_{}", safe_id)
+                    } else {
+                        format!("vdisk_{}", safe_id)
+                    };
+                }
+            }
+        }
+        if preferred_default == "shell" {
+            if let Some(first_win) = snapshot.iter().find(|i| i.is_windows) {
+                preferred_default = format!("win_iscsi_{}", sanitize_ipxe_key(&first_win.id));
+            } else if let Some(first) = snapshot.first() {
+                preferred_default = format!("vdisk_{}", sanitize_ipxe_key(&first.id));
+            }
+        }
+
+        script.push_str(&format!(
+            "isset ${{menu-default}} || set menu-default {}\n\n",
+            preferred_default
+        ));
 
         // MAC-based dispatch rules
         if !cfg.json_cfg.mac_bindings.is_empty() {
             script.push_str("# MAC-based Automated Dispatch\n");
             for (mac, target) in &cfg.json_cfg.mac_bindings {
                 let safe_target = sanitize_ipxe_key(target);
-                script.push_str(&format!("iseq ${{net0/mac}} {} && goto {} ||\n", mac.to_ascii_lowercase(), safe_target));
+                script.push_str(&format!(
+                    "iseq ${{net0/mac}} {} && goto {} ||\n",
+                    mac.to_ascii_lowercase(),
+                    safe_target
+                ));
             }
             script.push_str("\n");
         }
@@ -695,8 +928,14 @@ impl StorageManager {
             if item.is_windows {
                 let key = format!("win_iscsi_{}", safe_id);
                 let key_http = format!("win_http_{}", safe_id);
-                win_items.push(format!("item {} [WIN-iSCSI] {} [Path 1: ARMv7 tgt iSCSI]", key, label));
-                win_items.push(format!("item {} [WIN-HTTP] {} [Path 2: HTTP Range SANBOOT]", key_http, label));
+                win_items.push(format!(
+                    "item {} [WIN-iSCSI] {} [Path 1: ARMv7 tgt iSCSI]",
+                    key, label
+                ));
+                win_items.push(format!(
+                    "item {} [WIN-HTTP] {} [Path 2: HTTP Range SANBOOT]",
+                    key_http, label
+                ));
                 handlers.push(format!(
                     ":{}\necho Booting {} via Path 1 (Native iSCSI/iBFT SANBOOT)...\nset root-path iscsi:${{srv}}:::1:{}\nsanboot iscsi:${{srv}}:::1:{} || goto boot_failed\n",
                     key, label, iqn, iqn
@@ -705,13 +944,28 @@ impl StorageManager {
                     ":{}\necho Booting {} via Path 2 (HTTP Range SANBOOT)...\nsanboot http://${{srv}}:{}/iso/{} || goto boot_failed\n",
                     key_http, label, storage_port, item.file
                 ));
+                handlers.push(format!(
+                    ":{}\ngoto {}\n",
+                    sanitize_ipxe_key(&item.file),
+                    key
+                ));
+                handlers.push(format!(":{}\ngoto {}\n", safe_id, key));
             } else if item.file.to_ascii_lowercase().ends_with(".iso") {
                 let key_a = format!("iso_http_{}", safe_id);
                 let key_iscsi = format!("iso_iscsi_{}", safe_id);
                 let key_b = format!("iso_grub_{}", safe_id);
-                iso_items.push(format!("item {} [ISO-iSCSI] {} [Path 1: ARMv7 tgt iSCSI]", key_iscsi, label));
-                iso_items.push(format!("item {} [ISO-HTTP] {} [Path 2: HTTP Range SANBOOT]", key_a, label));
-                iso_items.push(format!("item {} [ISO-GRUB] {} [Scheme B: NetLoop GRUB]", key_b, label));
+                iso_items.push(format!(
+                    "item {} [ISO-iSCSI] {} [Path 1: ARMv7 tgt iSCSI]",
+                    key_iscsi, label
+                ));
+                iso_items.push(format!(
+                    "item {} [ISO-HTTP] {} [Path 2: HTTP Range SANBOOT]",
+                    key_a, label
+                ));
+                iso_items.push(format!(
+                    "item {} [ISO-GRUB] {} [Scheme B: NetLoop GRUB]",
+                    key_b, label
+                ));
 
                 handlers.push(format!(
                     ":{}\necho Booting {} via Path 1 (ARMv7 tgt iSCSI Target)...\nset root-path iscsi:${{srv}}:::1:{}\nsanboot iscsi:${{srv}}:::1:{} || goto boot_failed\n",
@@ -725,13 +979,34 @@ impl StorageManager {
                     ":{}\necho Handing off {} to Scheme B (NetLoop GRUB Subsystem)...\niseq ${{platform}} efi && chain http://${{srv}}:{}/grub/grubnet.efi || chain http://${{srv}}:{}/grub/core.0 || goto boot_failed\n",
                     key_b, label, storage_port, storage_port
                 ));
+                handlers.push(format!(
+                    ":{}\ngoto {}\n",
+                    sanitize_ipxe_key(&item.file),
+                    key_iscsi
+                ));
+                handlers.push(format!(":{}\ngoto {}\n", safe_id, key_iscsi));
             } else {
                 let key_b = format!("vdisk_{}", safe_id);
                 let key_a = format!("vdisk_nbd_{}", safe_id);
                 let key_iscsi = format!("vdisk_iscsi_{}", safe_id);
-                linux_items.push(format!("item {} [{}] {} (Default: Scheme B NetLoop GRUB)", key_b, item.format.to_uppercase(), label));
-                linux_items.push(format!("item {} [{}] {} [Scheme A: iVentoy NBD Hook]", key_a, item.format.to_uppercase(), label));
-                linux_items.push(format!("item {} [{}] {} [Scheme A: ARMv7 tgt iSCSI]", key_iscsi, item.format.to_uppercase(), label));
+                linux_items.push(format!(
+                    "item {} [{}] {} (Default: Scheme B NetLoop GRUB)",
+                    key_b,
+                    item.format.to_uppercase(),
+                    label
+                ));
+                linux_items.push(format!(
+                    "item {} [{}] {} [Scheme A: iVentoy NBD Hook]",
+                    key_a,
+                    item.format.to_uppercase(),
+                    label
+                ));
+                linux_items.push(format!(
+                    "item {} [{}] {} [Scheme A: ARMv7 tgt iSCSI]",
+                    key_iscsi,
+                    item.format.to_uppercase(),
+                    label
+                ));
 
                 handlers.push(format!(
                     ":{}\necho Handing off {} to Scheme B (NetLoop GRUB Subsystem)...\niseq ${{platform}} efi && chain http://${{srv}}:{}/grub/grubnet.efi || chain http://${{srv}}:{}/grub/core.0 || goto boot_failed\n",
@@ -744,6 +1019,24 @@ impl StorageManager {
                 handlers.push(format!(
                     ":{}\necho Booting {} via Scheme A (ARMv7 tgt iSCSI Target)...\nset root-path iscsi:${{srv}}:::1:{}\nsanboot iscsi:${{srv}}:::1:{} || goto boot_failed\n",
                     key_iscsi, label, iqn, iqn
+                ));
+                handlers.push(format!(
+                    ":{}\ngoto {}\n",
+                    sanitize_ipxe_key(&item.file),
+                    key_b
+                ));
+                handlers.push(format!(":{}\ngoto {}\n", safe_id, key_b));
+            }
+        }
+
+        for target in cfg.json_cfg.mac_bindings.values() {
+            let safe_target = sanitize_ipxe_key(target);
+            if !snapshot.iter().any(|i| {
+                sanitize_ipxe_key(&i.file) == safe_target || sanitize_ipxe_key(&i.id) == safe_target
+            }) {
+                handlers.push(format!(
+                    ":{}\necho Target image '{}' is not currently exported!\ngoto boot_failed\n",
+                    safe_target, target
                 ));
             }
         }
@@ -763,18 +1056,24 @@ impl StorageManager {
         }
 
         if !iso_items.is_empty() {
-            script.push_str("\nitem --gap -- ==================== ISO / WinPE Systems ====================\n");
+            script.push_str(
+                "\nitem --gap -- ==================== ISO / WinPE Systems ====================\n",
+            );
             for it in iso_items {
                 script.push_str(&format!("{}\n", it));
             }
         }
 
-        script.push_str("\nitem --gap -- ==================== Operations & Tools =================\n");
+        script.push_str(
+            "\nitem --gap -- ==================== Operations & Tools =================\n",
+        );
         script.push_str("item shell  Drop into iPXE Shell\n");
         script.push_str("item reboot Reboot Computer\n");
         script.push_str("item exit   Exit to Local BIOS/UEFI\n\n");
 
-        script.push_str("choose --timeout ${menu-timeout} --default ${menu-default} selected || goto shell\n");
+        script.push_str(
+            "choose --timeout ${menu-timeout} --default ${menu-default} selected || goto shell\n",
+        );
         script.push_str("goto ${selected}\n\n");
 
         script.push_str(":shell\nshell\n\n:reboot\nreboot\n\n:exit\nexit\n\n");
@@ -792,7 +1091,10 @@ impl StorageManager {
     pub async fn build_netloop_grub_cfg(&self) -> String {
         let (port, storage_node) = {
             let c = self.config.read().await;
-            let node = c.storage_node.clone().unwrap_or_else(|| "${net_default_server}".to_string());
+            let node = c
+                .storage_node
+                .clone()
+                .unwrap_or_else(|| "${net_default_server}".to_string());
             (c.bridge_port, node)
         };
         let mut cfg = String::new();

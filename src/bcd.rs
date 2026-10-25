@@ -16,22 +16,26 @@ impl Guid {
 
     // EFI System Partition (ESP): C12A7328-F81F-11D2-BA4B-00A0C93EC93B
     pub const ESP: Guid = Guid([
-        0x28, 0x73, 0x2a, 0xc1, 0x1f, 0xf8, 0xd2, 0x11, 0xba, 0x4b, 0x00, 0xa0, 0xc9, 0x3e, 0xc9, 0x3b,
+        0x28, 0x73, 0x2a, 0xc1, 0x1f, 0xf8, 0xd2, 0x11, 0xba, 0x4b, 0x00, 0xa0, 0xc9, 0x3e, 0xc9,
+        0x3b,
     ]);
 
     // Microsoft Basic Data: EBD0A0A2-B9E5-4433-87C0-68B6B72699C7
     pub const MS_BASIC_DATA: Guid = Guid([
-        0xa2, 0xa0, 0xd0, 0xeb, 0xe5, 0xb9, 0x33, 0x44, 0x87, 0xc0, 0x68, 0xb6, 0xb7, 0x26, 0x99, 0xc7,
+        0xa2, 0xa0, 0xd0, 0xeb, 0xe5, 0xb9, 0x33, 0x44, 0x87, 0xc0, 0x68, 0xb6, 0xb7, 0x26, 0x99,
+        0xc7,
     ]);
 
     // Microsoft Reserved (MSR): E3C9E316-0B5C-4DB8-817D-F92DF00215AE
     pub const MS_RESERVED: Guid = Guid([
-        0x16, 0xe3, 0xc9, 0xe3, 0x5c, 0x0b, 0xb8, 0x4d, 0x81, 0x7d, 0xf9, 0x2d, 0xf0, 0x02, 0x15, 0xae,
+        0x16, 0xe3, 0xc9, 0xe3, 0x5c, 0x0b, 0xb8, 0x4d, 0x81, 0x7d, 0xf9, 0x2d, 0xf0, 0x02, 0x15,
+        0xae,
     ]);
 
     // Linux Filesystem: 0FC63DAF-8483-4772-8E79-3D69D8477DE4
     pub const LINUX_FS: Guid = Guid([
-        0xaf, 0x3d, 0xc6, 0x0f, 0x83, 0x84, 0x72, 0x47, 0x8e, 0x79, 0x3d, 0x69, 0xd8, 0x47, 0x7d, 0xe4,
+        0xaf, 0x3d, 0xc6, 0x0f, 0x83, 0x84, 0x72, 0x47, 0x8e, 0x79, 0x3d, 0x69, 0xd8, 0x47, 0x7d,
+        0xe4,
     ]);
 
     pub fn from_string(s: &str) -> Option<Self> {
@@ -265,11 +269,22 @@ pub fn patch_bcd_bytes(
 
 /// Generates a synthesized BCD hive dynamically tailored for the given disk image.
 pub fn generate_patched_bcd_for_image(image_path: &str) -> io::Result<(Vec<u8>, Guid, Guid)> {
-    let info = inspect_disk_gpt(image_path)?
-        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, format!("Failed to read GPT from '{}'", image_path)))?;
+    let info = inspect_disk_gpt(image_path)?.ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("Failed to read GPT from '{}'", image_path),
+        )
+    })?;
 
-    let win_part = info.windows_partition
-        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, format!("No Microsoft Basic Data partition found in '{}'", image_path)))?;
+    let win_part = info.windows_partition.ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::NotFound,
+            format!(
+                "No Microsoft Basic Data partition found in '{}'",
+                image_path
+            ),
+        )
+    })?;
 
     let orig_disk = Guid::from_string(BASELINE_DISK_GUID).unwrap();
     let orig_part = Guid::from_string(BASELINE_PART_GUID).unwrap();
@@ -277,7 +292,8 @@ pub fn generate_patched_bcd_for_image(image_path: &str) -> io::Result<(Vec<u8>, 
     let target_disk = info.disk_guid;
     let target_part = win_part.unique_guid;
 
-    let (patched_bcd, disk_refs, part_refs) = patch_bcd_bytes(BASELINE_BCD, orig_disk, orig_part, target_disk, target_part);
+    let (patched_bcd, disk_refs, part_refs) =
+        patch_bcd_bytes(BASELINE_BCD, orig_disk, orig_part, target_disk, target_part);
     println!("[bcd] Patched in-tree BCD for '{}': Disk GUID={} ({} refs), Windows Part GUID={} ({} refs)",
              image_path, target_disk.to_string(), disk_refs, target_part.to_string(), part_refs);
 
@@ -303,11 +319,17 @@ mod tests {
         let p = "/mnt/ax9/vms/win8_golden.img";
         if std::path::Path::new(p).exists() {
             let info = inspect_disk_gpt(p).unwrap().expect("should parse gpt");
-            assert_eq!(info.disk_guid.to_string(), "B0AEDE45-7B48-4BDC-AFE3-C07BBA593BD8");
+            assert_eq!(
+                info.disk_guid.to_string(),
+                "B0AEDE45-7B48-4BDC-AFE3-C07BBA593BD8"
+            );
             assert!(info.has_esp);
             assert!(info.windows_partition.is_some());
             let win = info.windows_partition.unwrap();
-            assert_eq!(win.unique_guid.to_string(), "DF351A3D-33FB-47C0-9EB7-29C91B8CD4F4");
+            assert_eq!(
+                win.unique_guid.to_string(),
+                "DF351A3D-33FB-47C0-9EB7-29C91B8CD4F4"
+            );
         }
     }
 
@@ -315,8 +337,13 @@ mod tests {
     fn test_inspect_gpt_25h2_vhdx() {
         let p = "/run/media/namobuddha/2tbnvV/25h2.vhdx";
         if std::path::Path::new(p).exists() {
-            let info = inspect_disk_gpt(p).unwrap().expect("should parse dynamic vhdx gpt");
-            assert_eq!(info.disk_guid.to_string(), "F25B6A18-D2D8-4E30-ACC2-0561A973D3AA");
+            let info = inspect_disk_gpt(p)
+                .unwrap()
+                .expect("should parse dynamic vhdx gpt");
+            assert_eq!(
+                info.disk_guid.to_string(),
+                "F25B6A18-D2D8-4E30-ACC2-0561A973D3AA"
+            );
             assert!(info.has_esp);
         }
     }

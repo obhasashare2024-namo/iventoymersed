@@ -43,6 +43,14 @@ pub struct IVentoyJson {
     pub default_image: Option<String>,
     #[serde(default)]
     pub mac_bindings: HashMap<String, String>,
+    #[serde(default)]
+    pub mac_ips: HashMap<String, String>,
+    #[serde(default)]
+    pub role: Option<String>,
+    #[serde(default)]
+    pub storage_node: Option<String>,
+    #[serde(default)]
+    pub storage_port: Option<u16>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -140,7 +148,8 @@ pub fn load_iventoy_json(vtoy_dir: &str) -> IVentoyJson {
 
 pub fn save_iventoy_json(vtoy_dir: &str, cfg: &IVentoyJson) -> Result<(), String> {
     let p = format!("{}/iventoy.json", vtoy_dir);
-    let s = serde_json::to_string_pretty(cfg).map_err(|e| format!("Failed to serialize config: {}", e))?;
+    let s = serde_json::to_string_pretty(cfg)
+        .map_err(|e| format!("Failed to serialize config: {}", e))?;
     std::fs::write(&p, s).map_err(|e| format!("Failed to write {}: {}", p, e))?;
     println!("[config] Saved updated config to {}", p);
     Ok(())
@@ -206,5 +215,20 @@ pub fn load_simple_yaml(path: &str) -> Result<Config, String> {
         }
     }
     cfg.json_cfg = load_iventoy_json(&cfg.vtoy_dir);
+    if cfg.role == "standalone" {
+        if let Some(ref r) = cfg.json_cfg.role {
+            cfg.role = r.clone();
+        }
+    }
+    if cfg.storage_node.is_none() {
+        if let Some(ref sn) = cfg.json_cfg.storage_node {
+            cfg.storage_node = Some(sn.clone());
+        }
+    }
+    if cfg.storage_port.is_none() {
+        if let Some(sp) = cfg.json_cfg.storage_port {
+            cfg.storage_port = Some(sp);
+        }
+    }
     Ok(cfg)
 }

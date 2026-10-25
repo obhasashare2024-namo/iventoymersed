@@ -53,12 +53,22 @@ const VHDX_FILE_SIG: &[u8; 8] = b"vhdxfile";
 const VHDX_REGI_SIG: &[u8; 4] = b"regi";
 const VHDX_META_SIG: &[u8; 8] = b"metadata";
 
-const BAT_GUID: [u8; 16] = [0x66, 0x77, 0xc2, 0x2d, 0x23, 0xf6, 0x00, 0x42, 0x9d, 0x64, 0x11, 0x5e, 0x9b, 0xfd, 0x4a, 0x08];
-const META_GUID: [u8; 16] = [0x06, 0xa2, 0x7c, 0x8b, 0x90, 0x47, 0x9a, 0x4b, 0xb8, 0xfe, 0x57, 0x5f, 0x05, 0x0f, 0x88, 0x6e];
+const BAT_GUID: [u8; 16] = [
+    0x66, 0x77, 0xc2, 0x2d, 0x23, 0xf6, 0x00, 0x42, 0x9d, 0x64, 0x11, 0x5e, 0x9b, 0xfd, 0x4a, 0x08,
+];
+const META_GUID: [u8; 16] = [
+    0x06, 0xa2, 0x7c, 0x8b, 0x90, 0x47, 0x9a, 0x4b, 0xb8, 0xfe, 0x57, 0x5f, 0x05, 0x0f, 0x88, 0x6e,
+];
 
-const FILE_PARAMS_GUID: [u8; 16] = [0x37, 0x67, 0xa1, 0xca, 0x36, 0xfa, 0x43, 0x4d, 0xb3, 0xb6, 0x33, 0xf0, 0xaa, 0x44, 0xe7, 0x6b];
-const VDISK_SIZE_GUID: [u8; 16] = [0x24, 0x42, 0xa5, 0x2f, 0x1b, 0xcd, 0x76, 0x48, 0xb2, 0x11, 0x5d, 0xbe, 0xd8, 0x3b, 0xf4, 0xb8];
-const SECTOR_SIZE_GUID: [u8; 16] = [0x1d, 0xbf, 0x41, 0x81, 0x6f, 0xa9, 0x09, 0x47, 0xba, 0x47, 0xf2, 0x33, 0xa8, 0xfa, 0xab, 0x5f];
+const FILE_PARAMS_GUID: [u8; 16] = [
+    0x37, 0x67, 0xa1, 0xca, 0x36, 0xfa, 0x43, 0x4d, 0xb3, 0xb6, 0x33, 0xf0, 0xaa, 0x44, 0xe7, 0x6b,
+];
+const VDISK_SIZE_GUID: [u8; 16] = [
+    0x24, 0x42, 0xa5, 0x2f, 0x1b, 0xcd, 0x76, 0x48, 0xb2, 0x11, 0x5d, 0xbe, 0xd8, 0x3b, 0xf4, 0xb8,
+];
+const SECTOR_SIZE_GUID: [u8; 16] = [
+    0x1d, 0xbf, 0x41, 0x81, 0x6f, 0xa9, 0x09, 0x47, 0xba, 0x47, 0xf2, 0x33, 0xa8, 0xfa, 0xab, 0x5f,
+];
 
 #[derive(Clone, Debug)]
 pub struct VhdxMeta {
@@ -79,7 +89,8 @@ pub fn parse_vhdx_metadata(file: &std::fs::File) -> std::io::Result<Option<VhdxM
     let mut regi_found = false;
     let mut regi_offset = 196608u64;
     for &candidate in &[196608u64, 262144u64] {
-        if file.read_exact_at(&mut regi_hdr, candidate).is_ok() && &regi_hdr[0..4] == VHDX_REGI_SIG {
+        if file.read_exact_at(&mut regi_hdr, candidate).is_ok() && &regi_hdr[0..4] == VHDX_REGI_SIG
+        {
             regi_found = true;
             regi_offset = candidate;
             break;
@@ -362,7 +373,8 @@ pub fn parse_vpc_metadata(file: &std::fs::File) -> std::io::Result<Option<VpcMet
         return Ok(None);
     }
     if &footer[0..8] != b"conectix" {
-        if file.read_exact_at(&mut footer, file_len - 512).is_err() || &footer[0..8] != b"conectix" {
+        if file.read_exact_at(&mut footer, file_len - 512).is_err() || &footer[0..8] != b"conectix"
+        {
             return Ok(None);
         }
     }
@@ -430,17 +442,40 @@ impl CowStorage {
         let (file, is_read_only) = match OpenOptions::new().read(true).write(true).open(path) {
             Ok(f) => (f, false),
             Err(e) => {
-                eprintln!("[nbd] Read-write open failed for '{}': {}. Falling back to read-only.", path, e);
+                eprintln!(
+                    "[nbd] Read-write open failed for '{}': {}. Falling back to read-only.",
+                    path, e
+                );
                 let ro_file = OpenOptions::new().read(true).open(path)?;
                 (ro_file, true)
             }
         };
 
         let vhdx_meta = parse_vhdx_metadata(&file)?;
-        let vmdk_meta = if vhdx_meta.is_none() { parse_vmdk_metadata(&file)? } else { None };
-        let vdi_meta = if vhdx_meta.is_none() && vmdk_meta.is_none() { parse_vdi_metadata(&file)? } else { None };
-        let qcow2_meta = if vhdx_meta.is_none() && vmdk_meta.is_none() && vdi_meta.is_none() { parse_qcow2_metadata(&file)? } else { None };
-        let vpc_meta = if vhdx_meta.is_none() && vmdk_meta.is_none() && vdi_meta.is_none() && qcow2_meta.is_none() { parse_vpc_metadata(&file)? } else { None };
+        let vmdk_meta = if vhdx_meta.is_none() {
+            parse_vmdk_metadata(&file)?
+        } else {
+            None
+        };
+        let vdi_meta = if vhdx_meta.is_none() && vmdk_meta.is_none() {
+            parse_vdi_metadata(&file)?
+        } else {
+            None
+        };
+        let qcow2_meta = if vhdx_meta.is_none() && vmdk_meta.is_none() && vdi_meta.is_none() {
+            parse_qcow2_metadata(&file)?
+        } else {
+            None
+        };
+        let vpc_meta = if vhdx_meta.is_none()
+            && vmdk_meta.is_none()
+            && vdi_meta.is_none()
+            && qcow2_meta.is_none()
+        {
+            parse_vpc_metadata(&file)?
+        } else {
+            None
+        };
 
         let mut export_size = if let Some(ref meta) = vhdx_meta {
             meta.virtual_disk_size
@@ -456,12 +491,19 @@ impl CowStorage {
             file.metadata()?.len()
         };
 
-        if vhdx_meta.is_none() && vmdk_meta.is_none() && vdi_meta.is_none() && qcow2_meta.is_none() && vpc_meta.is_none() && export_size > 512 {
+        if vhdx_meta.is_none()
+            && vmdk_meta.is_none()
+            && vdi_meta.is_none()
+            && qcow2_meta.is_none()
+            && vpc_meta.is_none()
+            && export_size > 512
+        {
             use std::os::unix::fs::FileExt;
             let mut footer = [0u8; 512];
             if file.read_exact_at(&mut footer, export_size - 512).is_ok() {
                 if &footer[0..8] == b"conectix" {
-                    let disk_type = u32::from_be_bytes([footer[60], footer[61], footer[62], footer[63]]);
+                    let disk_type =
+                        u32::from_be_bytes([footer[60], footer[61], footer[62], footer[63]]);
                     if disk_type == 2 {
                         println!("[nbd] Auto-detected Fixed VHD: stripping 512B trailer (file_size={} MB, raw_size={} MB)",
                                  export_size / (1024 * 1024), (export_size - 512) / (1024 * 1024));
@@ -471,31 +513,59 @@ impl CowStorage {
             }
         }
 
-        let is_ro = is_read_only || vhdx_meta.is_some() || vmdk_meta.is_some() || vdi_meta.is_some() || qcow2_meta.is_some() || vpc_meta.is_some();
-        Ok((Self {
-            base_file: Arc::new(file),
-            diff_file: None,
-            diff_path: None,
-            idx_path: None,
-            export_size,
-            block_size: 4096,
-            bitmap: None,
-            is_read_only: is_ro,
-            vhdx_meta,
-            vmdk_meta,
-            vdi_meta,
-            qcow2_meta,
-            vpc_meta,
-        }, is_ro))
+        let is_ro = is_read_only
+            || vhdx_meta.is_some()
+            || vmdk_meta.is_some()
+            || vdi_meta.is_some()
+            || qcow2_meta.is_some()
+            || vpc_meta.is_some();
+        Ok((
+            Self {
+                base_file: Arc::new(file),
+                diff_file: None,
+                diff_path: None,
+                idx_path: None,
+                export_size,
+                block_size: 4096,
+                bitmap: None,
+                is_read_only: is_ro,
+                vhdx_meta,
+                vmdk_meta,
+                vdi_meta,
+                qcow2_meta,
+                vpc_meta,
+            },
+            is_ro,
+        ))
     }
 
     pub fn open_cow(base_path: &str, diff_path: &str) -> std::io::Result<Self> {
         let base_file = OpenOptions::new().read(true).open(base_path)?;
         let vhdx_meta = parse_vhdx_metadata(&base_file)?;
-        let vmdk_meta = if vhdx_meta.is_none() { parse_vmdk_metadata(&base_file)? } else { None };
-        let vdi_meta = if vhdx_meta.is_none() && vmdk_meta.is_none() { parse_vdi_metadata(&base_file)? } else { None };
-        let qcow2_meta = if vhdx_meta.is_none() && vmdk_meta.is_none() && vdi_meta.is_none() { parse_qcow2_metadata(&base_file)? } else { None };
-        let vpc_meta = if vhdx_meta.is_none() && vmdk_meta.is_none() && vdi_meta.is_none() && qcow2_meta.is_none() { parse_vpc_metadata(&base_file)? } else { None };
+        let vmdk_meta = if vhdx_meta.is_none() {
+            parse_vmdk_metadata(&base_file)?
+        } else {
+            None
+        };
+        let vdi_meta = if vhdx_meta.is_none() && vmdk_meta.is_none() {
+            parse_vdi_metadata(&base_file)?
+        } else {
+            None
+        };
+        let qcow2_meta = if vhdx_meta.is_none() && vmdk_meta.is_none() && vdi_meta.is_none() {
+            parse_qcow2_metadata(&base_file)?
+        } else {
+            None
+        };
+        let vpc_meta = if vhdx_meta.is_none()
+            && vmdk_meta.is_none()
+            && vdi_meta.is_none()
+            && qcow2_meta.is_none()
+        {
+            parse_vpc_metadata(&base_file)?
+        } else {
+            None
+        };
 
         let mut export_size = if let Some(ref meta) = vhdx_meta {
             meta.virtual_disk_size
@@ -511,12 +581,22 @@ impl CowStorage {
             base_file.metadata()?.len()
         };
 
-        if vhdx_meta.is_none() && vmdk_meta.is_none() && vdi_meta.is_none() && qcow2_meta.is_none() && vpc_meta.is_none() && export_size > 512 {
+        if vhdx_meta.is_none()
+            && vmdk_meta.is_none()
+            && vdi_meta.is_none()
+            && qcow2_meta.is_none()
+            && vpc_meta.is_none()
+            && export_size > 512
+        {
             use std::os::unix::fs::FileExt;
             let mut footer = [0u8; 512];
-            if base_file.read_exact_at(&mut footer, export_size - 512).is_ok() {
+            if base_file
+                .read_exact_at(&mut footer, export_size - 512)
+                .is_ok()
+            {
                 if &footer[0..8] == b"conectix" {
-                    let disk_type = u32::from_be_bytes([footer[60], footer[61], footer[62], footer[63]]);
+                    let disk_type =
+                        u32::from_be_bytes([footer[60], footer[61], footer[62], footer[63]]);
                     if disk_type == 2 {
                         println!("[nbd:cow] Auto-detected Fixed VHD: stripping 512B trailer (file_size={} MB, raw_size={} MB)",
                                  export_size / (1024 * 1024), (export_size - 512) / (1024 * 1024));
@@ -593,11 +673,21 @@ impl CowStorage {
                     let gt_sector = vmdk.gd[gt_idx];
                     if gt_sector != 0 {
                         let mut gte_buf = [0u8; 4];
-                        if self.base_file.read_exact_at(&mut gte_buf, (gt_sector as u64) * 512 + (gte_idx as u64) * 4).is_ok() {
+                        if self
+                            .base_file
+                            .read_exact_at(
+                                &mut gte_buf,
+                                (gt_sector as u64) * 512 + (gte_idx as u64) * 4,
+                            )
+                            .is_ok()
+                        {
                             let data_sector = u32::from_le_bytes(gte_buf);
                             if data_sector != 0 {
                                 let file_off = (data_sector as u64) * 512 + in_grain;
-                                self.base_file.read_exact_at(&mut buf[buf_idx..buf_idx + chunk_len], file_off)?;
+                                self.base_file.read_exact_at(
+                                    &mut buf[buf_idx..buf_idx + chunk_len],
+                                    file_off,
+                                )?;
                             } else {
                                 buf[buf_idx..buf_idx + chunk_len].fill(0);
                             }
@@ -630,7 +720,8 @@ impl CowStorage {
                     let p_block = vdi.bat[blk_idx];
                     if p_block < 0xFFFFFFFE {
                         let file_off = vdi.off_data + (p_block as u64) * block_size + in_block;
-                        self.base_file.read_exact_at(&mut buf[buf_idx..buf_idx + chunk_len], file_off)?;
+                        self.base_file
+                            .read_exact_at(&mut buf[buf_idx..buf_idx + chunk_len], file_off)?;
                     } else {
                         buf[buf_idx..buf_idx + chunk_len].fill(0);
                     }
@@ -661,7 +752,8 @@ impl CowStorage {
                     let state = entry & 0x7;
                     if state == 6 {
                         let file_off = (entry & 0xFFFFFFFFFFF00000) + in_block_offset;
-                        self.base_file.read_exact_at(&mut buf[buf_idx..buf_idx + chunk_len], file_off)?;
+                        self.base_file
+                            .read_exact_at(&mut buf[buf_idx..buf_idx + chunk_len], file_off)?;
                     } else {
                         buf[buf_idx..buf_idx + chunk_len].fill(0);
                     }
@@ -694,7 +786,11 @@ impl CowStorage {
                     let l2_offset = l1_entry & 0x00fffffffffffe00;
                     if l2_offset != 0 {
                         let mut l2_buf = [0u8; 8];
-                        if self.base_file.read_exact_at(&mut l2_buf, l2_offset + (l2_idx as u64) * 8).is_ok() {
+                        if self
+                            .base_file
+                            .read_exact_at(&mut l2_buf, l2_offset + (l2_idx as u64) * 8)
+                            .is_ok()
+                        {
                             let l2_entry = u64::from_be_bytes(l2_buf);
                             let is_zero = (l2_entry & 1) == 1 && ((l2_entry >> 62) & 1) == 1;
                             let cluster_offset = l2_entry & 0x00fffffffffffe00;
@@ -735,7 +831,8 @@ impl CowStorage {
                     let sector_off = vpc.bat[blk_idx];
                     if sector_off != 0xFFFFFFFF {
                         let file_off = (sector_off as u64) * 512 + vpc.bitmap_bytes + in_block;
-                        self.base_file.read_exact_at(&mut buf[buf_idx..buf_idx + chunk_len], file_off)?;
+                        self.base_file
+                            .read_exact_at(&mut buf[buf_idx..buf_idx + chunk_len], file_off)?;
                     } else {
                         buf[buf_idx..buf_idx + chunk_len].fill(0);
                     }
@@ -823,10 +920,16 @@ impl CowStorage {
     pub fn write_at(&self, data: &[u8], offset: u64) -> std::io::Result<()> {
         if self.diff_file.is_none() {
             if self.is_read_only {
-                return Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "Read-only export"));
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::PermissionDenied,
+                    "Read-only export",
+                ));
             }
             if self.vhdx_meta.is_some() {
-                return Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "Direct write to Dynamic VHDX without COW layer is prohibited"));
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::PermissionDenied,
+                    "Direct write to Dynamic VHDX without COW layer is prohibited",
+                ));
             }
             return self.base_file.write_all_at(data, offset);
         }
@@ -866,7 +969,8 @@ impl CowStorage {
             } else {
                 // Partial block on first modification: True Copy-On-Write
                 // Read base block, overlay chunk, and commit full block to diff file
-                let read_len = (self.export_size.saturating_sub(block_start) as usize).min(block_size as usize);
+                let read_len = (self.export_size.saturating_sub(block_start) as usize)
+                    .min(block_size as usize);
                 let mut full_block = vec![0u8; read_len];
                 let _ = self.read_base_at(&mut full_block, block_start);
                 let rel_offset = (cur_offset - block_start) as usize;
@@ -943,7 +1047,12 @@ impl EmbeddedNbdServer {
         Self::start_with_storage(port, Arc::new(storage), path, export_name, is_read_only).await
     }
 
-    pub async fn start_cow(port: u16, base_path: &str, diff_path: &str, export_name: &str) -> std::io::Result<Self> {
+    pub async fn start_cow(
+        port: u16,
+        base_path: &str,
+        diff_path: &str,
+        export_name: &str,
+    ) -> std::io::Result<Self> {
         let storage = CowStorage::open_cow(base_path, diff_path)?;
         Self::start_with_storage(port, Arc::new(storage), base_path, export_name, false).await
     }
@@ -1052,8 +1161,14 @@ async fn handle_connection(
     loop {
         let opt_magic = stream.read_u64().await?;
         if opt_magic != NBD_OPTS_MAGIC {
-            eprintln!("[nbd:client {}] Bad option magic: 0x{:016x}", peer_addr, opt_magic);
-            return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "Bad NBD option magic"));
+            eprintln!(
+                "[nbd:client {}] Bad option magic: 0x{:016x}",
+                peer_addr, opt_magic
+            );
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "Bad NBD option magic",
+            ));
         }
 
         let opt_id = stream.read_u32().await?;
@@ -1066,9 +1181,13 @@ async fn handle_connection(
         match opt_id {
             NBD_OPT_EXPORT_NAME => {
                 let requested_name = String::from_utf8_lossy(&opt_data);
-                println!("[nbd:client {}] Handshake completed via OPT_EXPORT_NAME (export='{}')", peer_addr, requested_name);
+                println!(
+                    "[nbd:client {}] Handshake completed via OPT_EXPORT_NAME (export='{}')",
+                    peer_addr, requested_name
+                );
 
-                let mut trans_flags = NBD_FLAG_HAS_FLAGS | NBD_FLAG_SEND_FLUSH | NBD_FLAG_CAN_MULTI_CONN;
+                let mut trans_flags =
+                    NBD_FLAG_HAS_FLAGS | NBD_FLAG_SEND_FLUSH | NBD_FLAG_CAN_MULTI_CONN;
                 if is_read_only {
                     trans_flags |= 0x0002; // NBD_FLAG_READ_ONLY
                 } else {
@@ -1083,7 +1202,14 @@ async fn handle_connection(
                 }
                 stream.flush().await?;
 
-                return run_transmission_loop(stream, peer_addr, storage, export_size, is_read_only).await;
+                return run_transmission_loop(
+                    stream,
+                    peer_addr,
+                    storage,
+                    export_size,
+                    is_read_only,
+                )
+                .await;
             }
             NBD_OPT_ABORT => {
                 println!("[nbd:client {}] Client requested OPT_ABORT", peer_addr);
@@ -1099,7 +1225,8 @@ async fn handle_connection(
                 send_opt_reply(&mut stream, opt_id, NBD_REP_ACK, &[]).await?;
             }
             NBD_OPT_INFO | NBD_OPT_GO => {
-                let mut trans_flags = NBD_FLAG_HAS_FLAGS | NBD_FLAG_SEND_FLUSH | NBD_FLAG_CAN_MULTI_CONN;
+                let mut trans_flags =
+                    NBD_FLAG_HAS_FLAGS | NBD_FLAG_SEND_FLUSH | NBD_FLAG_CAN_MULTI_CONN;
                 if is_read_only {
                     trans_flags |= 0x0002;
                 } else {
@@ -1116,7 +1243,14 @@ async fn handle_connection(
 
                 if opt_id == NBD_OPT_GO {
                     println!("[nbd:client {}] Handshake completed via OPT_GO", peer_addr);
-                    return run_transmission_loop(stream, peer_addr, storage, export_size, is_read_only).await;
+                    return run_transmission_loop(
+                        stream,
+                        peer_addr,
+                        storage,
+                        export_size,
+                        is_read_only,
+                    )
+                    .await;
                 }
             }
             NBD_OPT_STRUCTURED_REPLY => {
@@ -1165,7 +1299,10 @@ async fn run_transmission_loop(
         };
 
         if magic != NBD_REQUEST_MAGIC {
-            eprintln!("[nbd:client {}] Invalid request magic: 0x{:08x}", peer_addr, magic);
+            eprintln!(
+                "[nbd:client {}] Invalid request magic: 0x{:08x}",
+                peer_addr, magic
+            );
             break;
         }
 
@@ -1239,7 +1376,10 @@ async fn run_transmission_loop(
                 }
             }
             NBD_CMD_DISC => {
-                println!("[nbd:client {}] Received NBD_CMD_DISC, cleanly terminating session.", peer_addr);
+                println!(
+                    "[nbd:client {}] Received NBD_CMD_DISC, cleanly terminating session.",
+                    peer_addr
+                );
                 break;
             }
             NBD_CMD_FLUSH => {
