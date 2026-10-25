@@ -47,9 +47,28 @@
 
 ## 🇹🇼 繁體中文說明 (Default Traditional Chinese)
 
-### 🚀 v3.5.0 重大突破與核心特色
+### 🚀 v3.5.1 重大突破：全動態自適應網絡架構（Zero-Hardcoded IP）與旁路由集群解耦調度
 
-`iventoymersed` 是專為現代無盤網絡啟動、虛擬化維護與邊緣儲存打造的**純 Rust 雙軌融合網絡引導伺服器**。在最新發布的 **v3.5.0** 中，我們實現了全格式虛擬化與多 OS 實體跑通的歷史性飛躍：
+在最新發布的 **v3.5.1** 中，我們進一步實現了大規模網絡引導環境下的**控制面與數據面物理級分離**，徹底終結代碼與前端中任何寫死 IP 的痛點：
+
+1. **控制面與數據面解耦集群 (Decoupled Cluster Architecture)**：
+   - **調度大腦 (Orchestrator)**：超輕量部署於 OpenWrt 旁路由（如 91.11, ARMv7 musl 靜態二進制，RSS < 2MB），掌管 Web 控制台、客戶端 MAC/IP 預選綁定與動態 iPXE 引導腳本；
+   - **存儲節點 (Storage Node)**：部署於 NAS 或實體工作站（如 artix3070），承載 2TB+ 虛擬磁盤（Raw / VHD / VHDX / VMDK / QCOW2）之 In-Tree NBD 與 iSCSI 塊設備；
+   - **熱切換與自適應**：前端 Web 控制台支援手動選擇角色（Orchestrator / Standalone / Storage Node），並可自由填寫遠端數據節點 IP 及 Port，或留空自適應 `${next-server}`。
+2. **客戶端 MAC 預選與客戶端專屬靜態 IP 綁定 (Client MAC & Static IP Overrides)**：
+   - 支援為指定客戶端網卡 MAC 預先綁定目標系統鏡像，並可指定專屬客戶端 IP；
+   - **iPXE 雙通道注入**：Query 傳 MAC 時伺服器直接注入 `# Static IP override\nset ip <ip>`；通用菜單則注入 `iseq ${net0/mac} <mac> && set ip <ip> ||` 運行時動態求值；
+   - 規則全數持久化至 `iventoy.json`，客戶端開機自動精準命中。
+3. **全動態主機與 IP 感知 (Zero-Hardcoded IP)**：
+   - 前端 Web 控制台實時依據 `window.location.host` 渲染，絕不假定特定網段；
+   - 後端引導腳本全面以 `${srv}` 與 `${net_default_server}` 動態替換，杜絕歷史硬編碼。
+4. **前端現代化非阻塞體驗加固 (Non-Blocking Web UI)**：
+   - 全面以非阻塞浮動通知（`showToast()`）取代傳統阻斷式 `window.alert()`；
+   - 目標鏡像輸入框升級為 HTML5 `<input list="...">` 雙模封裝，兼顧本地自動補全與純調度大腦模式下的手填自訂。
+
+### 🚀 v3.5.0 核心特色回顧
+
+`iventoymersed` 是專為現代無盤網絡啟動、虛擬化維護與邊緣儲存打造的**純 Rust 雙軌融合網絡引導伺服器**：
 
 1. **純 Rust 內建全格式虛擬磁盤解析與 COW 差分引擎**：
    - 徹底終結對宿主機 `qemu-nbd`、`kpartx`、`dmsetup` 等外部重型工具的依賴；
@@ -280,9 +299,26 @@ dhcp-boot=tag:efi64,ipxe.efi,,<旁路由IP>
 
 ## 🇺🇸 English Documentation
 
-### Overview & v3.3.0 Breakthroughs
+### Overview & v3.5.1 Breakthroughs
 
-`iventoymersed` is an ultra-lightweight, high-performance **dual-engine netboot server written in 100% Pure Rust (Tokio + Axum)**. In version **v3.3.0**, it introduces four landmark innovations:
+`iventoymersed` is an ultra-lightweight, high-performance **dual-engine netboot server written in 100% Pure Rust (Tokio + Axum)**. In version **v3.5.1**, it achieves physical decoupling of control and data planes with a zero-hardcoded dynamic IP architecture:
+
+1. **Decoupled Cluster Architecture (Orchestrator vs Storage Node)**:
+   - **Orchestrator**: Ultra-lightweight deployment on OpenWrt side-routers (e.g. ARMv7 musl static binary, RSS < 2MB), managing Web UI, client MAC/IP pre-bindings, and dynamic iPXE scripts;
+   - **Storage Node**: Deployed on NAS or host workstations, serving 2TB+ virtual disks (Raw / VHD / VHDX / VMDK / QCOW2) over In-Tree COW NBD and iSCSI SANBOOT;
+   - **Hot Topology Switching**: Web UI supports switching roles on the fly and custom remote storage node IP/port configuration, or empty for automatic `${next-server}` adaptation.
+2. **Client MAC Pre-selection & Dedicated Static IP Overrides**:
+   - Allows binding specific client NIC MAC addresses to target OS images with optional dedicated static IP;
+   - **Dual-Channel iPXE Injection**: Directly emits `# Static IP override\nset ip <ip>` when MAC is queried, or injects runtime `iseq ${net0/mac} <mac> && set ip <ip> ||` for generic menus;
+   - Persisted in `iventoy.json` across reboots.
+3. **Zero-Hardcoded IP Dynamic Networking**:
+   - Web frontend renders dynamically based on `window.location.host`, never assuming hardcoded LAN subnets;
+   - Backend boot scripts dynamically interpolate `${srv}` and `${net_default_server}`.
+4. **Non-Blocking Modern Web UI Experience**:
+   - Replaces blocking modal `window.alert()` with non-blocking toast notifications (`showToast()`);
+   - Upgrades target image input with HTML5 `<input list="...">` dual-mode datalist supporting both local auto-completion and remote manual entry.
+
+### v3.5.0 Core Innovations Overview
 
 1. **In-Tree Pure Rust Dynamic VHDX & COW Engine**:
    - Zero external dependencies: completely eliminates `qemu-nbd`, `kpartx`, and `dmsetup`;
@@ -395,9 +431,26 @@ chmod +x iventoymersed
 
 ## 🇯🇵 日本語ドキュメント
 
-### 概要および v3.3.0 の主要な進化点
+### 概要および v3.5.1 の主要な進化点
 
-`iventoymersed` は、Pure Rust（Tokio + Axum）で開発された**デュアルエンジン統合型ネットワークブート（PXE/Netboot）サーバー**です。最新の **v3.3.0** では、以下の画期的な機能が追加されました：
+`iventoymersed` は、Pure Rust（Tokio + Axum）で開発された**デュアルエンジン統合型ネットワークブート（PXE/Netboot）サーバー**です。最新の **v3.5.1** では、制御プレーンとデータプレーンの物理分離とゼロハードコード動的 IP アーキテクチャを確立しました：
+
+1. **制御面とデータ面の分離クラスターアーキテクチャ（Orchestrator vs Storage Node）**：
+   - **オーケストレーター (Orchestrator)**：OpenWrt 副ルーター（ARMv7 musl、RSS < 2MB）などの軽量機器に展開。Web 管理画面、クライアント MAC/静的 IP マッピング、動的 iPXE スクリプト生成を担当；
+   - **ストレージノード (Storage Node)**：NAS やホストワークステーションに展開。2TB 超の大容量仮想ディスク（Raw / VHD / VHDX / VMDK / QCOW2）を In-Tree COW NBD や iSCSI SANBOOT 経由で提供；
+   - **トポロジーの即時切り替え**：Web 管理画面から役割（Orchestrator / Standalone / Storage Node）の切り替えや、リモートストレージノード IP・ポートの指定、または空欄での自動 `${next-server}` 追従が可能。
+2. **クライアント MAC 事前バインドおよび専用静的 IP 指定**：
+   - 特定のクライアント MAC アドレスに対して起動イメージおよび専用静的 IP を事前割り当て可能；
+   - **iPXE デュアルチャネル注入**：MAC クエリ時は直接 `# Static IP override\nset ip <ip>` を注入、汎用メニュー時は `iseq ${net0/mac} <mac> && set ip <ip> ||` を動的評価；
+   - 設定は `iventoy.json` に永続化され、再起動後も自動適用。
+3. **完全動的ホスト認識（Zero-Hardcoded IP）**：
+   - フロントエンド Web 画面は `window.location.host` に基づき動的レンダリング（固定 IP の仮定を完全排除）；
+   - バックエンド起動スクリプトは `${srv}` および `${net_default_server}` を自動補完。
+4. **ノンブロッキングな最新 Web UI**：
+   - ブロッキングな `window.alert()` を非同期トースト通知（`showToast()`）に完全刷新；
+   - 対象イメージ選択を HTML5 `<input list="...">` によるデュアルモード化（ローカル自動補完とリモート直接入力の双方に対応）。
+
+### v3.5.0 コア機能の振り返り
 
 1. **Pure Rust 組み込み動的 VHDX 解析および COW 差分エンジン**：
    - `qemu-nbd` や `kpartx` などの外部ホスト依存を完全に排除；
