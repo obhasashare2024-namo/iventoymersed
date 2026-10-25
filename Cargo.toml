@@ -1,6 +1,6 @@
 [package]
 name = "iventoymersed"
-version = "3.5.0"
+version = "3.5.1"
 edition = "2021"
 description = "iventoymersed: 100% Pure Rust Dual-Engine Network Boot Server with In-Tree NBD & iSCSI Target Manager"
 

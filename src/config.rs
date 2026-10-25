@@ -16,6 +16,9 @@ pub struct Config {
     pub vtoy_initrd_url: String,
     pub kernel_path: String,
     pub initrd_path: String,
+    pub role: String,
+    pub storage_node: Option<String>,
+    pub storage_port: Option<u16>,
     pub json_cfg: IVentoyJson,
 }
 
@@ -102,6 +105,9 @@ impl Default for Config {
             vtoy_initrd_url: "http://${next-server}:16000/vtoy/initramfs.img".into(),
             kernel_path: "/srv/vtoy/boot/vmlinuz".into(),
             initrd_path: "/srv/vtoy/boot/initramfs.img".into(),
+            role: "standalone".into(),
+            storage_node: None,
+            storage_port: None,
             json_cfg: IVentoyJson::default(),
         }
     }
@@ -176,8 +182,27 @@ pub fn load_simple_yaml(path: &str) -> Result<Config, String> {
                 "VTOY_INITRD_URL" => cfg.vtoy_initrd_url = v,
                 "KERNEL_PATH" => cfg.kernel_path = v,
                 "INITRD_PATH" => cfg.initrd_path = v,
+                "ROLE" => cfg.role = v.to_ascii_lowercase(),
+                "STORAGE_NODE" => cfg.storage_node = Some(v),
+                "STORAGE_PORT" => cfg.storage_port = v.parse().ok(),
                 _ => {}
             }
+        }
+    }
+    // Environment variable overrides
+    if let Ok(v) = std::env::var("ROLE") {
+        if !v.trim().is_empty() {
+            cfg.role = v.trim().to_ascii_lowercase();
+        }
+    }
+    if let Ok(v) = std::env::var("STORAGE_NODE") {
+        if !v.trim().is_empty() {
+            cfg.storage_node = Some(v.trim().to_string());
+        }
+    }
+    if let Ok(v) = std::env::var("STORAGE_PORT") {
+        if let Ok(p) = v.trim().parse() {
+            cfg.storage_port = Some(p);
         }
     }
     cfg.json_cfg = load_iventoy_json(&cfg.vtoy_dir);

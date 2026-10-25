@@ -14,7 +14,7 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 fn print_usage() {
     println!(
-        "iventoy-ipxe v{} - Pure Rust Standalone All-in-One iVentoy / iPXE Boot Server\n\nUsage: iventoy-ipxe [OPTIONS]\n\n  --config <PATH>  config file (default /etc/iventoy-ipxe/config.yaml or iventoy.json)\n  --host <HOST>    override BRIDGE_HOST\n  --port <PORT>    override BRIDGE_PORT\n  --version        print version\n  --help           this help",
+        "iventoy-ipxe v{} - Pure Rust Standalone All-in-One iVentoy / iPXE Boot Server\n\nUsage: iventoy-ipxe [OPTIONS]\n\n  --config <PATH>          config file (default /etc/iventoy-ipxe/config.yaml or iventoy.json)\n  --host <HOST>            override BRIDGE_HOST\n  --port <PORT>            override BRIDGE_PORT\n  --role <ROLE>            node role ('standalone', 'orchestrator', 'storage')\n  --storage-node <HOST>    Storage Node IP for Architecture B Decoupled Boot\n  --storage-port <PORT>    Storage Node port (defaults to BRIDGE_PORT)\n  --version                print version\n  --help                   this help",
         VERSION
     );
 }
@@ -54,6 +54,9 @@ async fn main() {
         .unwrap_or_else(|_| "/etc/iventoy-ipxe/config.yaml".to_string());
     let mut host_override: Option<String> = None;
     let mut port_override: Option<u16> = None;
+    let mut role_override: Option<String> = None;
+    let mut storage_node_override: Option<String> = None;
+    let mut storage_port_override: Option<u16> = None;
     let mut i = 1;
     while i < args.len() {
         match args[i].as_str() {
@@ -73,6 +76,24 @@ async fn main() {
                 i += 1;
                 if i < args.len() {
                     port_override = args[i].parse().ok();
+                }
+            }
+            "--role" => {
+                i += 1;
+                if i < args.len() {
+                    role_override = Some(args[i].to_ascii_lowercase());
+                }
+            }
+            "--storage-node" => {
+                i += 1;
+                if i < args.len() {
+                    storage_node_override = Some(args[i].clone());
+                }
+            }
+            "--storage-port" => {
+                i += 1;
+                if i < args.len() {
+                    storage_port_override = args[i].parse().ok();
                 }
             }
             "--version" => {
@@ -99,6 +120,15 @@ async fn main() {
     if let Some(p) = port_override {
         cfg.bridge_port = p;
     }
+    if let Some(r) = role_override {
+        cfg.role = r;
+    }
+    if let Some(sn) = storage_node_override {
+        cfg.storage_node = Some(sn);
+    }
+    if let Some(sp) = storage_port_override {
+        cfg.storage_port = Some(sp);
+    }
 
     let state = Arc::new(server::AppState {
         storage: Arc::new(storage::StorageManager::new(cfg.clone())),
@@ -116,15 +146,23 @@ async fn main() {
         }
     };
     println!(
-        "[*] iventoy-ipxe v{} (Pure Rust Standalone) running on {} mode={} pid={}",
+        "[*] iventoy-ipxe v{} (Pure Rust Standalone) running on {} mode={} role={} pid={}",
         VERSION,
         addr,
         match cfg.boot_mode {
             BootMode::Iscsi => "iscsi",
             BootMode::Nbd => "nbd",
         },
+        cfg.role,
         std::process::id()
     );
+    if let Some(ref sn) = cfg.storage_node {
+        println!(
+            "[orchestrator] Architecture B Storage Node Target: {}:{}",
+            sn,
+            cfg.storage_port.unwrap_or(cfg.bridge_port)
+        );
+    }
 
     let app = server::build_router(state.clone());
     let shutdown_state = state.clone();

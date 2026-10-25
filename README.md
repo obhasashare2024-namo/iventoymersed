@@ -245,15 +245,28 @@ dhcp-boot=tag:efi64,ipxe.efi,,192.168.91.11
   - **91.11 本機 Flash 磁盤佔用為 0 Byte**，客戶端重啟即秒級復原，遠端 NAS 上的黃金母盤 100% 免疫污染。
 
 ##### 【架構 B：控制面與數據面解耦引導（Decoupled Orchestrator & Cross-Host Chainload）】
-- **控制面（Control Plane）**：91.11 僅作為**「全域引導調度大腦」**（跑 Web Deck 控制台、監聽 26001、分發 DHCP Option 66/67 與 iPXE 菜單）；
-- **數據面（Data Plane）**：巨型磁盤檔案與 NBD/HTTP 串流實體部署在高吞吐算力機（如 91.29 PC NVMe 或 91.175 萬兆 NAS）；
-- **跨節點調度**：91.11 的引導腳本中，將客戶端開機請求重定向（Chainload）至真實數據節點：
+- **控制面（Control Plane / 旁路由）**：僅作為**「全域引導調度大腦」**（跑 Web Deck 控制台、監聽 26001、分發 DHCP Option 66/67 與 iPXE 菜單）；
+  - **v3.5.1 原生解耦參數**：在 `config.yaml` 或環境變數中宣告：
+    ```yaml
+    ROLE: "orchestrator"
+    STORAGE_NODE: "192.168.188.20"     # 遠端 NAS 數據節點 IP
+    STORAGE_PORT: 26001                # 遠端 NAS 服務埠
+    ```
+    啟動時亦可直接帶入 CLI 旗標：`./iventoymersed --role orchestrator --storage-node 192.168.188.20`。
+  - **Linux 網絡命名空間 (netns) 零衝突隔離**：
+    在複雜網絡或測試環境下，旁路由可置於獨立命名空間（如 `ip netns add ns_siderouter`）運行，徹底消除與宿主機的端口衝突（如 `0.0.0.0:26001` vs `192.168.188.11:26001`）與網絡棧污染。
+- **數據面（Data Plane / 虛擬 NAS）**：巨型磁盤檔案（VHDX / VMDK / VDI / Raw）與 NBD (10810-10823)、iSCSI (3260)、HTTP 206 串流實體部署在高吞吐算力機（如 188.20 NVMe 或 91.175 萬兆 NAS）；
+  - **COW 差分目錄最佳實踐**：強烈推薦將 `COW_DIR` 指定於原生 Linux 檔案系統（如 Btrfs / ext4，路徑如 `/var/tmp/cow`）。若存於 NTFS 磁區，必須以 `prealloc=0,sparse` 掛載，杜絕預設 `prealloc` 引發的稀疏差分檔 `EINVAL` (不適用的引數) 崩潰。
+- **跨節點調度**：旁路由發布的動態引導腳本中，將客戶端開機請求直接重定向（Chainload）至真實數據節點：
   ```ipxe
-  # 客戶端自 91.11 旁路由取得選單，但數十 GB 的虛擬磁盤流量直連 91.29 / 91.175
-  kernel http://192.168.91.29:26001/vtoy/vmlinuz ...
-  initrd http://192.168.91.29:26001/vtoy/initramfs.img
+  # 客戶端自旁路由取得選單，但數十 GB 的虛擬磁盤流量直連遠端 NAS 數據節點
+  kernel http://192.168.188.20:26001/vtoy/vmlinuz ... nbdroot=192.168.188.20 nbdport=10815 ...
+  initrd http://192.168.188.20:26001/vtoy/initramfs.img
+  # 或 Windows iSCSI 直連:
+  set root-path iscsi:192.168.188.20:::1:iqn.2026-10.lan:vtoy:win8-golden.img
+  sanhook --drive 0x80 iscsi:192.168.188.20:::1:iqn.2026-10.lan:vtoy:win8-golden.img
   ```
-- **核心優勢**：91.11 本身完全不介入大型磁盤 I/O，**幾十台機器並發開機的幾百 GB 流量直接在核心交換機與 NAS 之間傳輸**，完全不佔用 91.11 路由器的 CPU 與記憶體！
+- **核心優勢**：旁路由本身完全不介入大型磁盤 I/O，**幾十台機器並發開機的幾百 GB 流量直接在核心交換機與 NAS 之間傳輸**，完全不佔用旁路由器的 CPU 與記憶體！經非 91 隔離虛擬網段（`192.168.188.0/24`）實機壓測，antiX IceWM 桌面與 Windows 11 25H2 桌面雙雙通過 `verify-desktop-ocr` 驗收。
 
 ---
 
@@ -343,7 +356,19 @@ In a typical network where the main gateway is `192.168.91.1`, the OpenWrt route
 #### 3. Remote Storage Orchestration (0 Byte Local Disk Footprint)
 Since embedded routers have tiny flash (128M~512M), images (10G~70G) reside on external NAS/PC:
 - **Architecture A (NFS/CIFS Read-Only Mount)**: Mount remote NAS storage read-only at `/mnt/iso` on 91.11. Client writes are trapped in `/tmp/cow` (RAM tmpfs). 0 byte local flash consumed.
-- **Architecture B (Control/Data Decoupling)**: 91.11 serves as the Control Plane (Web Deck & DHCP/iPXE menu). Massive virtual disk I/O streams directly between client PCs and storage servers (`192.168.91.29` or `192.168.91.175`), completely offloading router CPU/RAM.
+- **Architecture B (Control/Data Decoupling & Cross-Host Chainload)**:
+  - **Control Plane**: The side router serves exclusively as the Control Plane orchestrator (Web Deck & iPXE dispatch).
+  - **v3.5.1 Native Parameters**: Configure in `config.yaml` or environment:
+    ```yaml
+    ROLE: "orchestrator"
+    STORAGE_NODE: "192.168.188.20"     # Remote Storage Node IP
+    STORAGE_PORT: 26001                # Remote Storage Node Port
+    ```
+    Or via CLI: `./iventoymersed --role orchestrator --storage-node 192.168.188.20`.
+  - **Linux Network Namespace (`ip netns`) Isolation**: In multi-node testbeds or edge appliances, the orchestrator can run inside an isolated network namespace (`ns_siderouter`), eliminating socket binding conflicts (`0.0.0.0:26001` vs `192.168.188.11:26001`) with host services.
+  - **Data Plane (Virtual NAS)**: Massive virtual disk I/O streams directly between client machines and high-throughput storage servers (`192.168.188.20` NBD/iSCSI/HTTP).
+  - **COW Filesystem Best Practice**: Strongly recommend hosting `COW_DIR` on native Linux filesystems (Btrfs / ext4, e.g. `/var/tmp/cow`). If placed on NTFS, mount with `prealloc=0,sparse` to prevent kernel `EINVAL` crashes on sparse difference files.
+  - **Verification**: Verified under an isolated non-91 subnet (`192.168.188.0/24`) with dual antiX IceWM and Windows 11 25H2 desktop sessions passing OCR validation.
 
 ---
 
@@ -422,7 +447,19 @@ chmod +x iventoymersed
 #### 3. ルーター本体にイメージを保存しないリモート起動方式（読み取り専用）
 ルーターの内蔵 Flash は極めて小さいため、大容量イメージ（10GB〜70GB）は外部 NAS や PC に保持します：
 - **方式 A（NFS/CIFS 読み取り専用マウント）**: リモート NAS を `/mnt/iso` に `ro` でマウント。クライアントの書き込みはルーターの `/tmp/cow`（RAM tmpfs）で遮断され、ルーター内蔵 Flash の消費は **0 バイト**。
-- **方式 B（制御面とデータ面の分離・チェーンロード）**: `192.168.91.11` は Web Deck と DHCP/iPXE メニュー配布（Control Plane）に特化し、数十GBのディスク通信（Data Plane）はクライアントと高速 NAS（`192.168.91.29` / `192.168.91.175`）間で直接ストリーミングされます。
+- **方式 B（制御面とデータ面の完全分離・クロスホストチェーンロード）**:
+  - **制御面（Control Plane / サイドルーター）**: Web Deck 管理画面と iPXE メニュー配布に専念。
+  - **v3.5.1 ネイティブ設定パラメータ**: `config.yaml` または環境変数で簡単に指定可能：
+    ```yaml
+    ROLE: "orchestrator"
+    STORAGE_NODE: "192.168.188.20"     # リモート NAS / ストレージノード IP
+    STORAGE_PORT: 26001                # ストレージノードのポート
+    ```
+    コマンドラインからも直接指定可能：`./iventoymersed --role orchestrator --storage-node 192.168.188.20`。
+  - **Linux ネットワーク名前空間 (`ip netns`) 衝突防止技術**: サイドルータープロセスを独立した名前空間（`ns_siderouter`）で起動することで、ホスト側のポートバインド（`0.0.0.0:26001` と `192.168.188.11:26001`）の重複を根本的に排除。
+  - **データ面（Data Plane / 仮想 NAS）**: 数十 GB の仮想ディスク通信（VHDX/VMDK/Raw）は、クライアントと高性能ストレージサーバー（`192.168.188.20` NBD/iSCSI/HTTP）間で直接ストリーミングされます。
+  - **COW 差分ファイルシステムのベストプラクティス**: `COW_DIR` は Linux ネイティブファイルシステム（Btrfs / ext4、例: `/var/tmp/cow`）上に配置することを強く推奨します。NTFS 上に配置する場合は、スパースファイルの `EINVAL` エラーを防止するため必ず `prealloc=0,sparse` オプションでマウントしてください。
+  - **実機検証完了**: 物理環境に影響を与えない非 91 隔離仮想サブネット（`192.168.188.0/24`）にて、antiX IceWM デスクトップおよび Windows 11 25H2 デスクトップ双方の起動・OCR 検証パスを実証済み。
 
 ---
 

@@ -644,7 +644,14 @@ impl StorageManager {
 
     /// Builds the top-level unified OS boot menu (eliminating dual-engine selector delay)
     pub async fn build_top_level_ipxe_menu(&self, _client_mac: Option<&str>) -> String {
-        let port = self.config.read().await.bridge_port;
+        let cfg = self.config.read().await;
+        let port = cfg.bridge_port;
+        let storage_port = cfg.storage_port.unwrap_or(port);
+        let srv_default = if let Some(ref sn) = cfg.storage_node {
+            sn.clone()
+        } else {
+            "${next-server}".to_string()
+        };
         let snapshot = self.health_targets().await;
         let mut script = String::new();
         script.push_str("#!ipxe\n\n");
@@ -654,8 +661,18 @@ impl StorageManager {
         script.push_str("cpair --foreground 3 --background 0 2 ||\n\n");
 
         script.push_str("set menu-timeout 5000\n");
-        script.push_str("isset ${srv} || set srv 192.168.91.11\n");
+        script.push_str(&format!("isset ${{srv}} || set srv {}\n", srv_default));
         script.push_str("isset ${menu-default} || set menu-default win_iscsi_win8_golden_img\n\n");
+
+        // MAC-based dispatch rules
+        if !cfg.json_cfg.mac_bindings.is_empty() {
+            script.push_str("# MAC-based Automated Dispatch\n");
+            for (mac, target) in &cfg.json_cfg.mac_bindings {
+                let safe_target = sanitize_ipxe_key(target);
+                script.push_str(&format!("iseq ${{net0/mac}} {} && goto {} ||\n", mac.to_ascii_lowercase(), safe_target));
+            }
+            script.push_str("\n");
+        }
 
         script.push_str(":start\n");
         script.push_str("menu iventoymersed Unified OS Boot Menu\n\n");
@@ -681,7 +698,7 @@ impl StorageManager {
                 ));
                 handlers.push(format!(
                     ":{}\necho Booting {} via Path 2 (HTTP Range SANBOOT)...\nsanboot http://${{srv}}:{}/iso/{} || goto boot_failed\n",
-                    key_http, label, port, item.file
+                    key_http, label, storage_port, item.file
                 ));
             } else if item.file.to_ascii_lowercase().ends_with(".iso") {
                 let key_a = format!("iso_http_{}", safe_id);
@@ -697,11 +714,11 @@ impl StorageManager {
                 ));
                 handlers.push(format!(
                     ":{}\necho Booting {} via Path 2 (iPXE HTTP Range SANBOOT)...\nsanboot http://${{srv}}:{}/iso/{} || goto boot_failed\n",
-                    key_a, label, port, item.file
+                    key_a, label, storage_port, item.file
                 ));
                 handlers.push(format!(
                     ":{}\necho Handing off {} to Scheme B (NetLoop GRUB Subsystem)...\niseq ${{platform}} efi && chain http://${{srv}}:{}/grub/grubnet.efi || chain http://${{srv}}:{}/grub/core.0 || goto boot_failed\n",
-                    key_b, label, port, port
+                    key_b, label, storage_port, storage_port
                 ));
             } else {
                 let key_b = format!("vdisk_{}", safe_id);
@@ -713,11 +730,11 @@ impl StorageManager {
 
                 handlers.push(format!(
                     ":{}\necho Handing off {} to Scheme B (NetLoop GRUB Subsystem)...\niseq ${{platform}} efi && chain http://${{srv}}:{}/grub/grubnet.efi || chain http://${{srv}}:{}/grub/core.0 || goto boot_failed\n",
-                    key_b, label, port, port
+                    key_b, label, storage_port, storage_port
                 ));
                 handlers.push(format!(
                     ":{}\necho Booting {} via Scheme A (iVentoy NBD Hook, Port {})...\nkernel http://${{srv}}:{}/vtoy/vmlinuz initrd=initramfs.img console=ttyS0 console=tty0 ip=dhcp nbdroot=${{srv}} nbdport={} nbdmaxpart=16 root={} rw nosplash verbose\ninitrd http://${{srv}}:{}/vtoy/initramfs.img\nboot || goto boot_failed\n",
-                    key_a, label, item.nbd_port, port, item.nbd_port, item.root_dev, port
+                    key_a, label, item.nbd_port, storage_port, item.nbd_port, item.root_dev, storage_port
                 ));
                 handlers.push(format!(
                     ":{}\necho Booting {} via Scheme A (ARMv7 tgt iSCSI Target)...\nset root-path iscsi:${{srv}}:::1:{}\nsanboot iscsi:${{srv}}:::1:{} || goto boot_failed\n",
