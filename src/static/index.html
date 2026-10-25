@@ -457,9 +457,9 @@
         <div>
           <div class="brand-title">
             iventoy-ipxe
-            <span class="badge-standalone">Pure Rust v2.0.0</span>
+            <span class="badge-standalone" id="brand-version">Pure Rust v3.5.1</span>
           </div>
-          <div class="brand-sub">All-in-One Standalone iPXE Boot Server · Zero Closed-Source Binaries</div>
+          <div class="brand-sub">All-in-One Standalone iPXE Boot Server · Decoupled Orchestrator & Multi-Format Virtual Disk Engine</div>
         </div>
       </div>
       <div class="header-stats">
@@ -486,43 +486,74 @@
       </div>
     </header>
 
+    <!-- Architecture & Topology Banner -->
+    <div class="card" style="padding: 16px 20px; border-left: 4px solid var(--accent-cyan);">
+      <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px;">
+        <div style="display: flex; align-items: center; gap: 12px;">
+          <div style="font-size: 26px;">🌐</div>
+          <div>
+            <div style="font-size: 15px; font-weight: 700; display: flex; align-items: center; gap: 8px;">
+              集群拓撲與節點角色 (Topology & Orchestration)
+              <span id="role-badge" class="badge-standalone" style="background: rgba(6, 182, 212, 0.15); color: var(--accent-cyan); border-color: rgba(6, 182, 212, 0.3);">
+                Orchestrator 調度大腦
+              </span>
+            </div>
+            <div style="font-size: 12px; color: var(--text-dim); margin-top: 2px;">
+              控制面與數據面解耦運作中 · 數據節點: <span id="storage-node-display" style="font-family: var(--mono); color: var(--accent-emerald);">動態 ${next-server}</span>
+            </div>
+          </div>
+        </div>
+        <div style="display: flex; gap: 10px; font-size: 12px; font-family: var(--mono); flex-wrap: wrap;">
+          <span style="background: rgba(255,255,255,0.05); padding: 4px 10px; border-radius: 6px; border: 1px solid var(--card-border);">
+            🛡️ Universal COW: <strong style="color: var(--accent-emerald);">.diff 寫時保護 (母盤 100% 唯讀)</strong>
+          </span>
+          <span style="background: rgba(255,255,255,0.05); padding: 4px 10px; border-radius: 6px; border: 1px solid var(--card-border);">
+            🚀 純 Rust 引擎: <strong style="color: var(--accent-cyan);">VHDX/VMDK/QCOW2/VDI/RAW</strong>
+          </span>
+        </div>
+      </div>
+    </div>
+
     <!-- Top Action Deck: Windows Mode Switcher -->
     <div class="card">
       <div class="card-header">
         <div class="card-title">
           <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z"></path></svg>
-          Windows 系統啟動模式主控 (Windows Dual-Boot Switcher)
+          Windows 系統引導雙模主控 (Windows Dual-Boot Engine)
         </div>
-        <span style="font-size: 12px; color: var(--text-dim);">客戶端可直接手選或由本開關設定默認</span>
+        <span style="font-size: 12px; color: var(--text-dim);">客戶端 iPXE 選單可直接手選，或由此設定預設引導路徑</span>
       </div>
       <div class="mode-switch-container">
         <div class="mode-box" id="box-iscsi" onclick="setWinMode('iscsi')">
           <div class="mode-header">
-            <span class="mode-name">⚡ 模式一：Native iSCSI SANBOOT (推薦)</span>
+            <span class="mode-name">⚡ 模式一：Native iSCSI / iBFT SANBOOT (微軟官方免驅 · 推薦)</span>
             <div class="mode-radio"></div>
           </div>
           <div class="mode-desc">
-            基於 Linux 原生 SCSI 目標（tgtadm），將磁碟直接映射為網絡物理塊設備。速度極快，無需驅動攔截，完全不修改虛擬磁碟內部檔案。
+            基於 Linux 原生 SCSI 目標（tgtadm），將虛擬磁碟映射為物理網絡塊設備並寫入 iBFT 表。Windows 原生 msiscsi.sys 免驅識別為本地硬盤啟動，速度最快，完全不修改虛擬磁碟內部檔案。
           </div>
           <div class="mode-tags">
             <span class="tag">速度最快</span>
-            <span class="tag">原生 SANBOOT</span>
-            <span class="tag">零修改</span>
+            <span class="tag">原生 iBFT</span>
+            <span class="tag">微軟官方免驅</span>
+            <span class="tag">零驅動修改</span>
+            <span class="tag">全格式支援</span>
           </div>
         </div>
 
-        <div class="mode-box" id="box-vtoyboot" onclick="setWinMode('vtoyboot')">
+        <div class="mode-box" id="box-http" onclick="setWinMode('http')">
           <div class="mode-header">
-            <span class="mode-name">🛡️ 模式二：Ventoy vtoyboot NBD Hook</span>
+            <span class="mode-name">🌐 模式二：HTTP Range Direct SANBOOT (HTTP 206 協議直連)</span>
             <div class="mode-radio"></div>
           </div>
           <div class="mode-desc">
-            透過 Ventoy 虛擬磁碟驅動 Hook 與 NBD 區塊通道，在 RAMDisk 階段注入磁碟掛載。適合特定精簡系統與多重分區兼容引導。
+            透過 HTTP 206 協議分塊直讀虛擬磁碟，客戶端 iPXE 直接發起 HTTP SANBOOT 引導。完全免除外部 iSCSI 守護進程依賴，適合輕量網絡、WinPE 及無 iSCSI 內核支援環境。
           </div>
           <div class="mode-tags">
-            <span class="tag">Ventoy 相容</span>
-            <span class="tag">NBD 守護進程</span>
-            <span class="tag">多重分區</span>
+            <span class="tag">HTTP 206 直連</span>
+            <span class="tag">免 iSCSI 守護進程</span>
+            <span class="tag">輕量引導</span>
+            <span class="tag">WinPE 友好</span>
           </div>
         </div>
       </div>
@@ -629,18 +660,38 @@
         currentTargets = data.targets || {};
         currentConfig = data.config || {};
 
-        // Stats
-        document.getElementById("stat-mem").innerText = (data.rss_mb ? data.rss_mb.toFixed(1) : "4.4") + " MB";
+        // Dynamic Version & Stats
+        if (data.version) {
+          document.getElementById("brand-version").innerText = "Pure Rust v" + data.version;
+        }
+        document.getElementById("stat-mem").innerText = (data.rss_mb ? data.rss_mb.toFixed(1) : "1.8") + " MB";
         document.getElementById("stat-targets").innerText = Object.keys(currentTargets).length + " Active";
         const uptimeSec = Math.floor(data.uptime_seconds || 0);
         const mins = Math.floor(uptimeSec / 60);
         const secs = uptimeSec % 60;
         document.getElementById("stat-uptime").innerText = `${mins}m ${secs}s`;
 
+        // Topology & Node Role
+        const roleBadge = document.getElementById("role-badge");
+        if (data.role === "orchestrator") {
+          roleBadge.innerText = "Orchestrator 調度大腦";
+          roleBadge.style.color = "var(--accent-cyan)";
+          roleBadge.style.borderColor = "rgba(6, 182, 212, 0.3)";
+        } else {
+          roleBadge.innerText = "Storage Node 數據存儲節點";
+          roleBadge.style.color = "var(--accent-emerald)";
+          roleBadge.style.borderColor = "rgba(16, 185, 129, 0.3)";
+        }
+        if (data.storage_node) {
+          document.getElementById("storage-node-display").innerText = `${data.storage_node}:${data.storage_port || 26001}`;
+        } else {
+          document.getElementById("storage-node-display").innerText = "動態 ${next-server}";
+        }
+
         // Win Mode Switcher
         const winMode = data.default_win_mode || "iscsi";
         document.getElementById("box-iscsi").classList.toggle("active", winMode === "iscsi");
-        document.getElementById("box-vtoyboot").classList.toggle("active", winMode === "vtoyboot");
+        document.getElementById("box-http").classList.toggle("active", winMode === "http" || winMode === "vtoyboot");
 
         // Images Table
         renderImagesTable(currentTargets, data.default_image);
@@ -748,7 +799,7 @@
           body: JSON.stringify({ mode })
         });
         if (res.ok) {
-          showToast("已切換 Windows 預設啟動模式為: " + mode);
+          showToast("已切換 Windows 預設啟動模式為: " + (mode === "iscsi" ? "Native iSCSI SANBOOT" : "HTTP Range Direct SANBOOT"));
           fetchStatus();
         }
       } catch (e) { alert("切換失敗: " + e); }

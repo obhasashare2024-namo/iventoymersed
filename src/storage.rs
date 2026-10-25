@@ -481,6 +481,11 @@ impl StorageManager {
         let cfg = self.config.read().await.clone();
         let win_cfg = &cfg.json_cfg.windows_boot;
 
+        let storage_node = cfg.storage_node.clone()
+            .unwrap_or_else(|| "${next-server}".to_string());
+        let storage_http_port = cfg.storage_port
+            .unwrap_or(cfg.bridge_port);
+
         let mut script = String::new();
 
         script.push_str("#!ipxe\n\n");
@@ -551,46 +556,46 @@ impl StorageManager {
                 win_items.push(format!("item {} [WIN] {} (Press Enter for Boot Modes)", menu_key, label));
 
                 let iscsi_key = format!("win_iscsi_{}", safe_id);
-                let vtoy_key = format!("win_vtoy_{}", safe_id);
-                let preferred_win_key = if win_cfg.default_mode == "vtoyboot" { &vtoy_key } else { &iscsi_key };
+                let http_key = format!("win_http_{}", safe_id);
+                let preferred_win_key = if win_cfg.default_mode == "http" { &http_key } else { &iscsi_key };
 
                 // Build Ventoy-style Submenu block
                 let mut sm = String::new();
                 sm.push_str(&format!(":{}\n", menu_key));
                 sm.push_str(&format!("menu Select Boot Mode for {}:\n", label));
-                sm.push_str(&format!("item {} [1] Native iSCSI SANBOOT (Fastest, zero driver change)\n", iscsi_key));
-                sm.push_str(&format!("item {} [2] Ventoy vtoyboot NBD Hook (Virtual disk driver hook)\n", vtoy_key));
+                sm.push_str(&format!("item {} [1] Native iSCSI / iBFT SANBOOT (Fastest, zero driver change)\n", iscsi_key));
+                sm.push_str(&format!("item {} [2] HTTP Range Direct SANBOOT (HTTP 206 protocol)\n", http_key));
                 sm.push_str("item start               [3] <-- Back to Main Menu\n\n");
                 sm.push_str(&format!("choose --timeout ${{submenu-timeout}} --default {} win_choice_{} || goto start\n", preferred_win_key, safe_id));
                 sm.push_str(&format!("goto ${{win_choice_{}}}\n", safe_id));
                 submenus.push(sm);
 
-                // Submenu Handler: iSCSI
+                // Submenu Handler 1: Native iSCSI / iBFT SANBOOT
                 let iqn = sanitize_ipxe_text(&info.iqn);
                 handlers.push(format!(
-                    ":{}\necho Booting {} via Native iSCSI Target ({}) ...\nset root-path iscsi:${{next-server}}:::1:{}\nsanboot iscsi:${{next-server}}:::1:{} || goto boot_failed\n",
-                    iscsi_key, label, iqn, iqn, iqn
+                    ":{}\necho Booting {} via Native iSCSI Target ({}) ...\nset root-path iscsi:{}:::1:{}\nsanboot iscsi:{}:::1:{} || goto boot_failed\n",
+                    iscsi_key, label, iqn, storage_node, iqn, storage_node, iqn
                 ));
 
-                // Submenu Handler: vtoyboot Hook
+                // Submenu Handler 2: HTTP Range Direct SANBOOT
                 handlers.push(format!(
-                    ":{}\necho Booting {} via Ventoy NBD Hook (Port {}) ...\nkernel {} initrd=initramfs.img console=ttyS0 console=tty0 ip=dhcp nbdroot=${{next-server}} nbdport={} nbdmaxpart=16 root={} rw nosplash verbose\ninitrd {}\nboot || goto boot_failed\n",
-                    vtoy_key, label, info.nbd_port, cfg.vtoy_kernel_url, info.nbd_port, info.root_dev, cfg.vtoy_initrd_url
+                    ":{}\necho Booting {} via HTTP Range Direct SANBOOT ...\nsanboot http://{}:{}/iso/{} || goto boot_failed\n",
+                    http_key, label, storage_node, storage_http_port, info.file
                 ));
             } else if info.file.to_ascii_lowercase().ends_with(".iso") {
                 let item_key = format!("iso_{}", safe_id);
                 iso_items.push(format!("item {} [ISO] {}", item_key, label));
                 handlers.push(format!(
-                    ":{}\necho Booting {} via HTTP Direct sanboot ...\nsanboot http://${{next-server}}:{}/iso/{} || goto boot_failed\n",
-                    item_key, label, cfg.bridge_port, info.file
+                    ":{}\necho Booting {} via HTTP Direct sanboot ...\nsanboot http://{}:{}/iso/{} || goto boot_failed\n",
+                    item_key, label, storage_node, storage_http_port, info.file
                 ));
             } else {
                 let item_key = format!("vdisk_{}", safe_id);
                 vdisk_items.push(format!("item {} [{}] {}", item_key, info.format.to_uppercase(), label));
 
                 handlers.push(format!(
-                    ":{}\necho Booting {} via NBD (Port {}, Root {}) ...\nkernel {} initrd=initramfs.img console=ttyS0 console=tty0 ip=dhcp nbdroot=${{next-server}} nbdport={} nbdmaxpart=16 root={} rw nosplash verbose\ninitrd {}\nboot || goto boot_failed\n",
-                    item_key, label, info.nbd_port, info.root_dev, cfg.vtoy_kernel_url, info.nbd_port, info.root_dev, cfg.vtoy_initrd_url
+                    ":{}\necho Booting {} via Pure Rust NBD (Port {}, Root {}) ...\nkernel {} initrd=initramfs.img console=ttyS0 console=tty0 ip=dhcp nbdroot={} nbdport={} nbdmaxpart=16 root={} rw nosplash verbose\ninitrd {}\nboot || goto boot_failed\n",
+                    item_key, label, info.nbd_port, info.root_dev, cfg.vtoy_kernel_url, storage_node, info.nbd_port, info.root_dev, cfg.vtoy_initrd_url
                 ));
             }
         }
