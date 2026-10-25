@@ -618,11 +618,10 @@
         </p>
         <div class="form-row" style="flex-wrap: wrap;">
           <input type="text" id="mac-input" class="input-field" placeholder="MAC: 00:1a:2b:3c:4d:5e" style="flex: 1.2; min-width: 170px;">
-          <select id="image-select" class="select-field" style="flex: 1.5; min-width: 180px;">
-            <option value="">選擇目標鏡像...</option>
-          </select>
+          <input list="image-list" id="image-select" class="input-field" placeholder="選擇或填寫目標鏡像 (如 win8_golden.img)" style="flex: 1.5; min-width: 190px;">
+          <datalist id="image-list"></datalist>
           <input type="text" id="ip-input" class="input-field" placeholder="指定客戶端 IP (選填)" style="flex: 1.2; min-width: 150px;">
-          <button class="btn btn-primary" onclick="addMacBinding()">綁定</button>
+          <button class="btn btn-primary" onclick="addMacBinding()">➕ 綁定鏡像</button>
         </div>
         <div class="table-container" style="margin-top: 10px;">
           <table>
@@ -784,15 +783,15 @@
     }
 
     function updateImageSelect(targets) {
-      const sel = document.getElementById("image-select");
-      const currentVal = sel.value;
-      let html = '<option value="">選擇鏡像...</option>';
+      const dl = document.getElementById("image-list");
+      if (!dl) return;
+      let html = "";
       for (const k of Object.keys(targets)) {
         const f = targets[k].file;
-        html += `<option value="${f}">${f}</option>`;
+        const fmt = targets[k].format ? targets[k].format.toUpperCase() : "RAW";
+        html += `<option value="${f}">${f} (${fmt})</option>`;
       }
-      sel.innerHTML = html;
-      if (currentVal) sel.value = currentVal;
+      dl.innerHTML = html;
     }
 
     function renderMacBindings(bindings, ips) {
@@ -833,10 +832,10 @@
           showToast(`已切換為 [${role.toUpperCase()}] 模式 · 存儲節點: ${node || "動態自適應"}`);
           fetchStatus();
         } else {
-          alert("設定失敗: " + await res.text());
+          showToast("❌ 設定失敗: " + await res.text());
         }
       } catch (e) {
-        alert("設定異常: " + e);
+        showToast("❌ 設定異常: " + e);
       }
     }
 
@@ -867,7 +866,7 @@
           showToast("已切換 Windows 預設啟動模式為: " + (mode === "iscsi" ? "Native iSCSI SANBOOT" : "HTTP Range Direct SANBOOT"));
           fetchStatus();
         }
-      } catch (e) { alert("切換失敗: " + e); }
+      } catch (e) { showToast("❌ 切換失敗: " + e); }
     }
 
     async function setDefaultImage(image) {
@@ -881,14 +880,14 @@
           showToast("已設定默認啟動鏡像: " + image);
           fetchStatus();
         }
-      } catch (e) { alert("設定失敗: " + e); }
+      } catch (e) { showToast("❌ 設定失敗: " + e); }
     }
 
     async function addMacBinding() {
       const mac = document.getElementById("mac-input").value.trim();
-      const image = document.getElementById("image-select").value;
+      const image = document.getElementById("image-select").value.trim();
       const ip = document.getElementById("ip-input").value.trim();
-      if (!mac || !image) { alert("請輸入 MAC 地址並選擇目標鏡像"); return; }
+      if (!mac || !image) { showToast("⚠️ 請輸入 MAC 地址並填寫或選擇目標鏡像"); return; }
       try {
         const res = await fetch("/api/config/mac-binding", {
           method: "POST",
@@ -896,12 +895,12 @@
           body: JSON.stringify({ mac, image, ip: ip || null })
         });
         if (res.ok) {
-          showToast(`已綁定 MAC ${mac} -> ${image} ${ip ? `(IP: ${ip})` : ""}`);
+          showToast(`✅ 已綁定 MAC ${mac} -> ${image} ${ip ? `(IP: ${ip})` : ""}`);
           document.getElementById("mac-input").value = "";
           document.getElementById("ip-input").value = "";
           fetchStatus();
         }
-      } catch (e) { alert("綁定失敗: " + e); }
+      } catch (e) { showToast("❌ 綁定失敗: " + e); }
     }
 
     async function removeMac(mac) {
@@ -915,7 +914,7 @@
           showToast(`已移除 MAC ${mac} 綁定`);
           fetchStatus();
         }
-      } catch (e) { alert("解綁失敗: " + e); }
+      } catch (e) { showToast("❌ 解綁失敗: " + e); }
     }
 
     async function triggerRescan() {
@@ -926,7 +925,7 @@
           showToast("磁碟目錄掃描與 NBD 端口更新完成！");
           fetchStatus();
         }
-      } catch (e) { alert("掃描失敗: " + e); }
+      } catch (e) { showToast("❌ 掃描失敗: " + e); }
     }
 
     function copyIpxeUrl() {
