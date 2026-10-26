@@ -72,10 +72,17 @@
    - 支援為指定客戶端網卡 MAC 預先綁定目標系統鏡像，並可指定專屬客戶端 IP；
    - **iPXE 雙通道注入**：Query 傳 MAC 時伺服器直接注入 `# Static IP override\nset ip <ip>`；通用菜單則注入 `iseq ${net0/mac} <mac> && set ip <ip> ||` 運行時動態求值；
    - 規則全數持久化至 `iventoy.json`，客戶端開機自動精準命中。
-3. **全動態主機與 IP 感知 (Zero-Hardcoded IP)**：
+3. **動態引導倒數與客戶端手工挑選自由 (Dynamic Boot Timeout & Manual Override Freedom)**：
+   - 頂部導航欄提供動態倒數秒數配置（`POST /api/config/timeout`，1~300 秒，預設 10 秒）；
+   - **痛點修正**：徹底移除傳統 `goto <target>` 剝奪現場管理員手選權限的硬性跳轉，改為 `iseq ${net0/mac} <mac> && set menu-default <target> ||` 搭配 `choose --timeout`；
+   - **雙軌行為**：無人值守時倒數歸零自動開進預選母盤；倒數期間現場一旦觸發鍵盤方向鍵（Up/Down），**計時瞬間中止並常駐選單**，用戶保留 100% 自由挑選救援 WinPE、Linux 或其他母盤的權限！
+4. **解耦集群遠端磁盤目標動態嗅探 (Decoupled Target Discovery)**：
+   - 旁路由調度大腦主動向遠端存儲節點（如 `192.168.91.29:26001`）拉取 `/api/status` 目標池；
+   - 即時將遠端母盤同步至 Web 控制台下拉選單與 iPXE 選單樹，旁路由維持零磁碟佔用與極低記憶體開銷（RSS < 2.5MB）。
+5. **全動態主機與 IP 感知 (Zero-Hardcoded IP)**：
    - 前端 Web 控制台實時依據 `window.location.host` 渲染，絕不假定特定網段；
    - 後端引導腳本全面以 `${srv}` 與 `${net_default_server}` 動態替換，杜絕歷史硬編碼。
-4. **前端現代化非阻塞體驗加固 (Non-Blocking Web UI)**：
+6. **前端現代化非阻塞體驗加固 (Non-Blocking Web UI)**：
    - 全面以非阻塞浮動通知（`showToast()`）取代傳統阻斷式 `window.alert()`；
    - 目標鏡像輸入框升級為 HTML5 `<input list="...">` 雙模封裝，兼顧本地自動補全與純調度大腦模式下的手填自訂。
 
