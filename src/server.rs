@@ -74,6 +74,7 @@ async fn api_status(State(state): State<Arc<AppState>>) -> Response<Body> {
         boot_mode: String,
         default_win_mode: String,
         default_image: Option<String>,
+        menu_timeout: u32,
         mac_bindings: HashMap<String, String>,
         mac_ips: HashMap<String, String>,
         targets: std::collections::BTreeMap<String, TargetOut>,
@@ -112,6 +113,7 @@ async fn api_status(State(state): State<Arc<AppState>>) -> Response<Body> {
         boot_mode: format!("{:?}", cfg.boot_mode).to_lowercase(),
         default_win_mode: cfg.json_cfg.windows_boot.default_mode,
         default_image: cfg.json_cfg.default_image,
+        menu_timeout: cfg.json_cfg.menu_timeout.unwrap_or(10),
         mac_bindings: cfg.json_cfg.mac_bindings,
         mac_ips: cfg.json_cfg.mac_ips,
         targets,
@@ -728,6 +730,28 @@ async fn api_set_cluster(
         .unwrap()
 }
 
+#[derive(Deserialize)]
+struct SetTimeoutIn {
+    timeout: u32,
+}
+
+async fn api_set_timeout(
+    State(state): State<Arc<AppState>>,
+    axum::Json(payload): axum::Json<SetTimeoutIn>,
+) -> Response<Body> {
+    if let Err(e) = state.storage.set_menu_timeout(payload.timeout).await {
+        return Response::builder()
+            .status(StatusCode::INTERNAL_SERVER_ERROR)
+            .body(Body::from(e))
+            .unwrap();
+    }
+    Response::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(r#"{"ok":true}"#))
+        .unwrap()
+}
+
 pub fn make_app(state: Arc<AppState>) -> Router {
     Router::new()
         .route("/", any(root_handler))
@@ -751,6 +775,7 @@ pub fn make_app(state: Arc<AppState>) -> Router {
         .route("/api/rescan", post(api_rescan))
         .route("/api/config/default-win-mode", post(api_set_win_mode))
         .route("/api/config/default-image", post(api_set_default_image))
+        .route("/api/config/timeout", post(api_set_timeout))
         .route("/api/config/cluster", post(api_set_cluster))
         .route(
             "/api/config/mac-binding",

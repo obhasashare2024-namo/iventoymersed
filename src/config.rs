@@ -51,6 +51,8 @@ pub struct IVentoyJson {
     pub storage_node: Option<String>,
     #[serde(default)]
     pub storage_port: Option<u16>,
+    #[serde(default)]
+    pub menu_timeout: Option<u32>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -194,6 +196,11 @@ pub fn load_simple_yaml(path: &str) -> Result<Config, String> {
                 "ROLE" => cfg.role = v.to_ascii_lowercase(),
                 "STORAGE_NODE" => cfg.storage_node = Some(v),
                 "STORAGE_PORT" => cfg.storage_port = v.parse().ok(),
+                "MENU_TIMEOUT" | "TIMEOUT" => {
+                    if let Ok(t) = v.parse() {
+                        cfg.json_cfg.menu_timeout = Some(t);
+                    }
+                }
                 _ => {}
             }
         }
@@ -212,6 +219,11 @@ pub fn load_simple_yaml(path: &str) -> Result<Config, String> {
     if let Ok(v) = std::env::var("STORAGE_PORT") {
         if let Ok(p) = v.trim().parse() {
             cfg.storage_port = Some(p);
+        }
+    }
+    if let Ok(v) = std::env::var("MENU_TIMEOUT") {
+        if let Ok(t) = v.trim().parse() {
+            cfg.json_cfg.menu_timeout = Some(t);
         }
     }
     cfg.json_cfg = load_iventoy_json(&cfg.vtoy_dir);

@@ -525,6 +525,13 @@
         <input type="number" id="cfg-storage-port" class="input-field" placeholder="端口: 26001" style="width: 110px;">
         <button class="btn btn-primary" onclick="saveClusterConfig()">💾 儲存並即時切換</button>
         <button class="btn btn-sm" onclick="resetStorageNode()">🔄 清空設為自適應</button>
+
+        <div style="display: inline-flex; align-items: center; gap: 6px; margin-left: auto; background: rgba(255,255,255,0.03); padding: 4px 8px; border-radius: 6px; border: 1px solid var(--card-border);">
+          <span style="font-size: 12px; font-weight: 600; color: var(--accent-cyan);">⏱️ 預設引導倒數:</span>
+          <input type="number" id="cfg-timeout" class="input-field" placeholder="秒數" style="width: 75px; text-align: center;" min="1" max="300" value="10">
+          <span style="font-size: 12px; color: var(--text-dim);">秒</span>
+          <button class="btn btn-primary btn-sm" onclick="saveTimeout()">儲存秒數</button>
+        </div>
       </div>
     </div>
 
@@ -614,7 +621,7 @@
           </div>
         </div>
         <p style="font-size: 12px; color: var(--text-dim);">
-          當特定主機開機時，若匹配其網卡 MAC 地址，客戶端屏幕將自動預選專屬鏡像，並可指定專屬客戶端 IP：
+          當特定主機開機時，若匹配其網卡 MAC 地址，客戶端選單將自動預選專屬鏡像並展開倒數計時（倒數結束自動進入；按任意方向鍵可中斷倒數並手選其他系統），並可指定專屬客戶端 IP：
         </p>
         <div class="form-row" style="flex-wrap: wrap;">
           <input type="text" id="mac-input" class="input-field" placeholder="MAC: 00:1a:2b:3c:4d:5e" style="flex: 1.2; min-width: 170px;">
@@ -725,6 +732,10 @@
         }
         if (roleInput && !roleInput.matches(":focus")) {
           roleInput.value = data.role || "standalone";
+        }
+        const toInput = document.getElementById("cfg-timeout");
+        if (toInput && !toInput.matches(":focus")) {
+          toInput.value = data.menu_timeout || 10;
         }
 
         // Images Table
@@ -867,6 +878,27 @@
           fetchStatus();
         }
       } catch (e) { showToast("❌ 切換失敗: " + e); }
+    }
+
+    async function saveTimeout() {
+      const val = parseInt(document.getElementById("cfg-timeout").value, 10);
+      if (isNaN(val) || val < 1 || val > 300) {
+        showToast("⚠️ 請輸入有效的倒數秒數 (1 ~ 300 秒)");
+        return;
+      }
+      try {
+        const res = await fetch("/api/config/timeout", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ timeout: val })
+        });
+        if (res.ok) {
+          showToast(`✅ 預設引導倒數已更新為 ${val} 秒！`);
+          fetchStatus();
+        } else {
+          showToast("❌ 儲存秒數失敗");
+        }
+      } catch (e) { showToast("❌ 儲存失敗: " + e); }
     }
 
     async function setDefaultImage(image) {

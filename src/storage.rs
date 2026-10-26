@@ -139,6 +139,12 @@ impl StorageManager {
         crate::config::save_iventoy_json(&cfg.vtoy_dir, &cfg.json_cfg)
     }
 
+    pub async fn set_menu_timeout(&self, timeout_secs: u32) -> Result<(), String> {
+        let mut cfg = self.config.write().await;
+        cfg.json_cfg.menu_timeout = Some(timeout_secs);
+        crate::config::save_iventoy_json(&cfg.vtoy_dir, &cfg.json_cfg)
+    }
+
     pub async fn set_mac_binding(
         &self,
         mac: String,
@@ -405,15 +411,103 @@ impl StorageManager {
 
     /// Re-scan VTOY_DIR; exports new images, respawns dead qemu-nbd, unexports vanished ones.
     pub async fn scan_and_export(&self) {
-        let (vtoy_dir, iqn_prefix, boot_mode, json_cfg) = {
+        let (vtoy_dir, iqn_prefix, boot_mode, json_cfg, role, storage_node, storage_port) = {
             let cfg = self.config.read().await;
             (
                 cfg.vtoy_dir.clone(),
                 cfg.iqn_prefix.clone(),
                 cfg.boot_mode,
                 cfg.json_cfg.clone(),
+                cfg.role.clone(),
+                cfg.storage_node.clone(),
+                cfg.storage_port.unwrap_or(26001),
             )
         };
+
+        // Orchestrator syncs targets from remote Storage Node
+        if role == "orchestrator" {
+            if let Some(ref sn) = storage_node {
+                let url = format!("http://{}:{}/api/status", sn, storage_port);
+                let client = match reqwest::Client::builder()
+                    .timeout(std::time::Duration::from_millis(1500))
+                    .build()
+                {
+                    Ok(c) => c,
+                    Err(_) => reqwest::Client::new(),
+                };
+                if let Ok(resp) = client.get(&url).send().await {
+                    if let Ok(txt) = resp.text().await {
+                        if let Ok(val) = serde_json::from_str::<serde_json::Value>(&txt) {
+                            if let Some(targets_obj) = val.get("targets").and_then(|v| v.as_object()) {
+                            let mut map = self.targets.lock().await;
+                            map.clear();
+                            for (id, t) in targets_obj {
+                                let file = t
+                                    .get("file")
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or(id)
+                                    .to_string();
+                                let path = t
+                                    .get("path")
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("")
+                                    .to_string();
+                                let iqn = t
+                                    .get("iqn")
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("")
+                                    .to_string();
+                                let nbd_port = t
+                                    .get("nbd_port")
+                                    .and_then(|v| v.as_u64())
+                                    .unwrap_or(10810) as u16;
+                                let backend = t
+                                    .get("backend")
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("remote-nbd")
+                                    .to_string();
+                                let root_dev = t
+                                    .get("root_dev")
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("")
+                                    .to_string();
+                                let format = t
+                                    .get("format")
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("raw")
+                                    .to_string();
+                                let is_windows =
+                                    t.get("is_windows").and_then(|v| v.as_bool()).unwrap_or(false);
+                                let has_partitions = t
+                                    .get("has_partitions")
+                                    .and_then(|v| v.as_bool())
+                                    .unwrap_or(true);
+                                let alive = t.get("alive").and_then(|v| v.as_bool());
+
+                                let info = TargetInfo {
+                                    id: id.clone(),
+                                    file,
+                                    path,
+                                    tid: 100,
+                                    iqn,
+                                    nbd_port,
+                                    backend_type: backend,
+                                    proc_pid: None,
+                                    alive,
+                                    has_partitions,
+                                    root_dev,
+                                    format,
+                                    is_windows,
+                                };
+                                map.insert(id.clone(), Target { info, backend: None });
+                            }
+                            return;
+                        }
+                    }
+                }
+            }
+        }
+    }
 
         if !tokio::fs::metadata(&vtoy_dir).await.is_ok() {
             if let Err(e) = tokio::fs::create_dir_all(&vtoy_dir).await {
@@ -614,8 +708,10 @@ impl StorageManager {
         script.push_str("cpair --foreground 6 --background 0 1 ||\n");
         script.push_str("cpair --foreground 3 --background 0 2 ||\n\n");
 
-        script.push_str("set menu-timeout 15000\n");
-        script.push_str("set submenu-timeout 15000\n\n");
+        let timeout_secs = cfg.json_cfg.menu_timeout.unwrap_or(15);
+        let timeout_ms = timeout_secs * 1000;
+        script.push_str(&format!("set menu-timeout {}\n", timeout_ms));
+        script.push_str(&format!("set submenu-timeout {}\n\n", timeout_ms));
 
         // Determine default item based on MAC binding -> global default -> first item
         let clean_mac = client_mac.map(|m| m.trim().to_ascii_lowercase().replace('-', ":"));
@@ -830,7 +926,9 @@ impl StorageManager {
         script.push_str("cpair --foreground 6 --background 0 1 ||\n");
         script.push_str("cpair --foreground 3 --background 0 2 ||\n\n");
 
-        script.push_str("set menu-timeout 5000\n");
+        let timeout_secs = cfg.json_cfg.menu_timeout.unwrap_or(10);
+        let timeout_ms = timeout_secs * 1000;
+        script.push_str(&format!("set menu-timeout {}\n", timeout_ms));
         script.push_str(&format!("isset ${{srv}} || set srv {}\n", srv_default));
 
         let clean_mac = client_mac.map(|m| m.trim().to_ascii_lowercase().replace('-', ":"));
@@ -859,7 +957,7 @@ impl StorageManager {
         let mut preferred_default = "shell".to_string();
         if let Some(ref mac) = clean_mac {
             if let Some(target_file) = cfg.json_cfg.mac_bindings.get(mac) {
-                if let Some(item) = snapshot.iter().find(|i| &i.file == target_file) {
+                if let Some(item) = snapshot.iter().find(|i| &i.file == target_file || &i.id == target_file) {
                     let safe_id = sanitize_ipxe_key(&item.id);
                     preferred_default = if item.is_windows {
                         format!("win_iscsi_{}", safe_id)
@@ -873,7 +971,7 @@ impl StorageManager {
         }
         if preferred_default == "shell" {
             if let Some(ref def_img) = cfg.json_cfg.default_image {
-                if let Some(item) = snapshot.iter().find(|i| &i.file == def_img) {
+                if let Some(item) = snapshot.iter().find(|i| &i.file == def_img || &i.id == def_img) {
                     let safe_id = sanitize_ipxe_key(&item.id);
                     preferred_default = if item.is_windows {
                         format!("win_iscsi_{}", safe_id)
@@ -898,15 +996,26 @@ impl StorageManager {
             preferred_default
         ));
 
-        // MAC-based dispatch rules
+        // MAC-based pre-selection overrides (retaining timeout countdown and manual selection freedom)
         if !cfg.json_cfg.mac_bindings.is_empty() {
-            script.push_str("# MAC-based Automated Dispatch\n");
+            script.push_str("# MAC-based Pre-Selection Overrides (With Countdown & Manual Override)\n");
             for (mac, target) in &cfg.json_cfg.mac_bindings {
-                let safe_target = sanitize_ipxe_key(target);
+                let target_key = if let Some(item) = snapshot.iter().find(|i| &i.file == target || &i.id == target) {
+                    let safe_id = sanitize_ipxe_key(&item.id);
+                    if item.is_windows {
+                        format!("win_iscsi_{}", safe_id)
+                    } else if item.file.to_ascii_lowercase().ends_with(".iso") {
+                        format!("iso_iscsi_{}", safe_id)
+                    } else {
+                        format!("vdisk_{}", safe_id)
+                    }
+                } else {
+                    sanitize_ipxe_key(target)
+                };
                 script.push_str(&format!(
-                    "iseq ${{net0/mac}} {} && goto {} ||\n",
+                    "iseq ${{net0/mac}} {} && set menu-default {} ||\n",
                     mac.to_ascii_lowercase(),
-                    safe_target
+                    target_key
                 ));
             }
             script.push_str("\n");
