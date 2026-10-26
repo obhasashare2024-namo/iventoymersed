@@ -196,18 +196,19 @@ chmod +x /etc/init.d/iventoymersed
 
 頁面右上方將彈出綠色 Toast 提示：`Cluster configuration saved successfully!`，設定即刻熱生效並持久化。
 
-### 5.3 客戶端 MAC 預選與客戶端專屬靜態 IP 綁定
+### 5.3 客戶端 MAC 預選、靜態 IP 綁定與引導倒數秒數配置
 
-在頁面中間的 **MAC Binding & Auto-Boot (客戶端鏡像預選與靜態 IP 綁定)** 區塊中：
-1. **Client MAC (客戶端網卡 MAC)**：輸入目標無盤工作站的 MAC 地址，例如 `52:54:00:a1:81:99`；
-2. **Target Image (目標母盤)**：直接輸入存儲節點上的母盤檔案名，例如 `win11_golden.vhdx`（或從 datalist 自動提示清單選擇）；
-3. **Client Static IP (可選專屬靜態 IP)**：輸入欲分配給該機器的專用靜態 IP，例如 `192.168.91.199`；
-4. 點擊 **`Bind Image (綁定鏡像)`** 按鈕。
+在頁面中：
+1. **Boot Timeout (預設引導倒數)**：在頂部工具列可輸入預設倒數秒數（例如 `10` 秒），點擊「儲存秒數」即時生效。
+2. **Client MAC (客戶端網卡 MAC)**：輸入目標無盤工作站的 MAC 地址，例如 `52:54:00:a1:81:99`；
+3. **Target Image (目標母盤)**：從下拉選單直接選擇存儲節點已同步的映像，例如 `win8_golden.img` 或 `25h2.vhdx`；
+4. **Client Static IP (可選專屬靜態 IP)**：輸入欲分配給該機器的專用靜態 IP，例如 `192.168.91.199`；
+5. 點擊 **`Bind Image (綁定鏡像)`** 按鈕。
 
 <p align="center">
-  <img src="screenshots/webui_cluster_configured.png" width="92%" alt="iventoymersed WebUI 集群與 MAC/IP 配置成功">
+  <img src="screenshots/webui_timeout_configured.png" width="92%" alt="iventoymersed WebUI 集群、倒數秒數與 MAC/IP 配置成功">
   <br>
-  <em>圖 2：成功配置 Orchestrator 角色、存儲節點 IP 192.168.91.22:26001，並將 MAC 52:54:00:a1:81:99 綁定至專屬 IP 192.168.91.199</em>
+  <em>圖 2：成功配置 Orchestrator 角色、存儲節點 IP 192.168.91.29:26001、引導倒數 10 秒，並將 MAC 52:54:00:a1:81:99 綁定至專屬 IP 192.168.91.199</em>
 </p>
 
 > [!TIP]
@@ -232,17 +233,36 @@ chmod +x /etc/init.d/iventoymersed
   <em>圖 3：客戶端順利獲取 IP，iPXE 內核初始化完畢，準備向旁路由拉取動態引導配置</em>
 </p>
 
-### 6.2 第二階段：精準命中預選規則並重定向至遠端存儲節點
+### 6.2 第二階段：精準命中預選規則並啟動倒數計時 (Pre-Selection Countdown)
 
-iPXE 韌體向旁路由請求 `http://192.168.91.11:26000/ipxe?mac=52:54:00:a1:81:99`。調度大腦立即辨識出該 MAC 已預綁定：
+iPXE 韌體向旁路由請求 `http://192.168.91.11:26001/boot.ipxe`。調度大腦立即辨識出該 MAC 已預綁定：
 - 自動將客戶端 IP 強制設置為 `192.168.91.199`；
-- 引導腳本自動指向遠端存儲節點 `192.168.91.22:26001` 的 In-Tree NBD 塊設備；
-- 自動跳過互動選單，直接啟動母盤：
+- 引導腳本使用 `set menu-default <target_key>` 預選目標，並啟動 10 秒倒數：
+- **無人值守**：若現場無人觸碰鍵盤，倒數 10 秒歸零後，自動觸發 SANBOOT 啟動指定母盤！
 
 <p align="center">
-  <img src="screenshots/ipxe_client_dispatch_stage2.png" width="80%" alt="iPXE 客戶端第二階段分發">
+  <img src="screenshots/vm_ipxe_countdown_live.png" width="80%" alt="iPXE 客戶端倒數計時自動引導">
   <br>
-  <em>圖 4：客戶端精準命中 win8_golden.img / win11_golden.vhdx 規則，自動跳轉掛載遠端 192.168.91.22 存儲節點</em>
+  <em>圖 4：客戶端精準命中 win8_golden.img 預選規則，選單高亮並即時倒數計時 (10) ... (1)</em>
+</p>
+
+### 6.3 第三階段：現場鍵盤介入——即刻中止倒數並保留手工自由挑選 (Manual Override Freedom)
+
+在許多無盤網吧或維護場景中，管理員或用戶可能臨時需要進入救援 WinPE、Linux 或切換其他母盤。`iventoymersed` 徹底解決了傳統腳本「硬性直接跳轉 (goto) 剝奪手選自由」的弊病：
+- 用戶只需在倒數期間按下 **鍵盤方向鍵（Up/Down）**；
+- iPXE 原生中斷倒數計時器，倒數數字瞬間消失，選單永久保持互動狀態；
+- 用戶可自由將游標移至其他任何系統（如 `HTTP Range SANBOOT` 或 `Linux NetLoop`），按 Enter 即可啟動手選目標！
+
+<p align="center">
+  <img src="screenshots/vm_boot_manual_override.png" width="80%" alt="iPXE 鍵盤中斷倒數保留手工挑選自由">
+  <br>
+  <em>圖 5：用戶按下方向鍵，倒數瞬間中止，游標移動至第 2 啟動路徑，保留 100% 手工自由挑選權</em>
+</p>
+
+<p align="center">
+  <img src="screenshots/vm_boot_manual_selected.png" width="80%" alt="iPXE 手選目標順利啟動">
+  <br>
+  <em>圖 6：按下 Enter 後，系統精準依照用戶手選手動路徑完成 SAN 設備註冊並秒速進入引導鏈</em>
 </p>
 
 ---

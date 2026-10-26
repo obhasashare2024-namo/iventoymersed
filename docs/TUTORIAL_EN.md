@@ -193,18 +193,19 @@ In the **Cluster Configuration** section at the top:
 
 A non-blocking green notification toast (`Cluster configuration saved successfully!`) confirms instant activation and persistence.
 
-### 5.3 Client MAC Pre-Selection & Static IP Binding
+### 5.3 Client MAC Pre-Selection, Static IP Binding & Dynamic Boot Timeout
 
-In the **MAC Binding & Auto-Boot** section:
-1. **Client MAC**: Enter the target client NIC MAC address, e.g., `52:54:00:a1:81:99`;
-2. **Target Image**: Enter the master image name on the Storage Node, e.g., `win11_golden.vhdx` (or select from the datalist dropdown);
-3. **Client Static IP (Optional)**: Enter the intended static IP, e.g., `192.168.91.199`;
-4. Click **`Bind Image`**.
+In the Web Control Deck:
+1. **Boot Timeout Countdown**: In the top navigation bar, set the default countdown duration (e.g. `10` seconds) and click "Save Seconds".
+2. **Client MAC**: Enter the target client NIC MAC address, e.g., `52:54:00:a1:81:99`;
+3. **Target Image**: Select the synchronized image on the Storage Node from the dropdown, e.g., `win8_golden.img` or `25h2.vhdx`;
+4. **Client Static IP (Optional)**: Enter the intended static IP, e.g., `192.168.91.199`;
+5. Click **`Bind Image`**.
 
 <p align="center">
-  <img src="screenshots/webui_cluster_configured.png" width="92%" alt="iventoymersed WebUI Cluster & MAC Binding Configured">
+  <img src="screenshots/webui_timeout_configured.png" width="92%" alt="iventoymersed WebUI Cluster, Timeout & MAC Binding Configured">
   <br>
-  <em>Figure 2: Orchestrator role configured with remote storage 192.168.91.22:26001 and MAC 52:54:00:a1:81:99 bound to static IP 192.168.91.199.</em>
+  <em>Figure 2: Orchestrator configured with Storage Node 192.168.91.29:26001, 10s boot timeout countdown, and MAC 52:54:00:a1:81:99 bound to 192.168.91.199.</em>
 </p>
 
 > [!TIP]
@@ -228,17 +229,37 @@ The client NIC sends a PXE broadcast. OpenWrt responds with `ipxe.efi`:
   <em>Figure 3: Client acquires lease, initializes iPXE core, and requests configuration from the side router.</em>
 </p>
 
-### 6.2 Phase 2: MAC Match & Storage Node Redirection
+### 6.2 Phase 2: Pre-Selection Countdown (Unattended Auto-Boot)
 
-The client pulls `http://192.168.91.11:26000/ipxe?mac=52:54:00:a1:81:99`. The Orchestrator matches the rule:
+The client pulls `http://192.168.91.11:26001/boot.ipxe`. The Orchestrator matches the rule:
 - Static IP `192.168.91.199` is applied.
-- Boot redirection points directly to the Storage Node at `192.168.91.22:26001`.
-- Interactive prompts are bypassed, jumping straight to block device mount:
+- The pre-assigned target (`win8_golden.img`) is pre-selected via `set menu-default <target_key>`.
+- A 10-second timer countdown starts on the client screen `(10) ... (1)`.
+- **Unattended Mode**: If no keyboard input is detected, the countdown reaches zero and automatically launches the bound image via SANBOOT.
 
 <p align="center">
-  <img src="screenshots/ipxe_client_dispatch_stage2.png" width="80%" alt="iPXE Client Phase 2 Dispatch">
+  <img src="screenshots/vm_ipxe_countdown_live.png" width="80%" alt="iPXE Client Pre-Selection Countdown">
   <br>
-  <em>Figure 4: Client matches pre-bound rule, bypassing manual selection and streaming directly from 192.168.91.22.</em>
+  <em>Figure 4: Client matches pre-assigned target, highlighting the entry with a real-time countdown timer (10) ... (1).</em>
+</p>
+
+### 6.3 Phase 3: Keyboard Intervention (Instant Abort & Manual Selection Freedom)
+
+In field operations or maintenance, administrators often need the freedom to choose a recovery WinPE, Linux, or alternative master image. `iventoymersed` solves the classic flaw of hardcoded `goto` statements:
+- Pressing any **Arrow Key (Up/Down)** during the countdown immediately halts the timer.
+- The countdown number disappears, and the menu remains interactive indefinitely.
+- The user can freely navigate to any OS image or alternative boot mode and press Enter.
+
+<p align="center">
+  <img src="screenshots/vm_boot_manual_override.png" width="80%" alt="iPXE Countdown Aborted on Arrow Key">
+  <br>
+  <em>Figure 5: User pressed Arrow Down: timer immediately terminated and cursor moved to Path 2, granting 100% manual selection freedom.</em>
+</p>
+
+<p align="center">
+  <img src="screenshots/vm_boot_manual_selected.png" width="80%" alt="iPXE User-Selected Target Booting">
+  <br>
+  <em>Figure 6: Pressing Enter launches the manually chosen target with immediate SAN device registration.</em>
 </p>
 
 ---

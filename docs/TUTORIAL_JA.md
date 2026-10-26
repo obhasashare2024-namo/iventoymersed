@@ -193,18 +193,19 @@ chmod +x /etc/init.d/iventoymersed
 
 右上にグリーンの通知 Toast が表示され、設定が即時反映・永続化されます。
 
-### 5.3 クライアント MAC 予約と専用静的 IP の割り当て
+### 5.3 クライアント MAC 予約、静的 IP 割り当て、およびカウントダウン設定
 
-画面中部の **MAC Binding & Auto-Boot** エリア：
-1. **Client MAC**：対象クライアントの NIC MAC アドレス（例：`52:54:00:a1:81:99`）を入力；
-2. **Target Image**：ストレージ上のイメージ名（例：`win11_golden.vhdx`）を入力（datalist 補完対応）；
-3. **Client Static IP (任意)**：割り当てたい静的 IP（例：`192.168.91.199`）を入力；
-4. **`Bind Image`** ボタンをクリック。
+Web コントロールデッキ上にて：
+1. **ブートカウントダウン秒数設定**：上部バーにてデフォルトの猶予秒数（例：`10` 秒）を入力し、「秒数を保存」をクリック；
+2. **Client MAC**：対象クライアントの NIC MAC アドレス（例：`52:54:00:a1:81:99`）を入力；
+3. **Target Image**：ストレージ上のイメージ名（例：`win8_golden.img` または `25h2.vhdx`）を選択；
+4. **Client Static IP (任意)**：割り当てたい静的 IP（例：`192.168.91.199`）を入力；
+5. **`Bind Image`** ボタンをクリック。
 
 <p align="center">
-  <img src="screenshots/webui_cluster_configured.png" width="92%" alt="iventoymersed WebUI クラスタ・MAC 設定完了">
+  <img src="screenshots/webui_timeout_configured.png" width="92%" alt="iventoymersed WebUI クラスタ・カウントダウン・MAC 設定完了">
   <br>
-  <em>図 2：Orchestrator ロールが設定され、192.168.91.22:26001 への転送および MAC 52:54:00:a1:81:99 に対する静的 IP 192.168.91.199 の紐付けが完了した状態</em>
+  <em>図 2：Orchestrator ロール、ストレージノード 192.168.91.29:26001、カウントダウン 10 秒、および MAC 52:54:00:a1:81:99 に対する静的 IP 192.168.91.199 の設定完了状態</em>
 </p>
 
 > [!TIP]
@@ -228,17 +229,36 @@ PXE ブロードキャストを受信した OpenWrt が即座に `ipxe.efi` を�
   <em>図 3：IP リースの取得後、iPXE コアが初期化され、ルーターへ動的構成スクリプトを要求</em>
 </p>
 
-### 6.2 フェーズ 2：予約ルールの一致とストレージノードへの転送
+### 6.2 フェーズ 2：予約ルールの一致と自動カウントダウン (Pre-Selection Countdown)
 
-クライアントが `http://192.168.91.11:26000/ipxe?mac=52:54:00:a1:81:99` をフェッチした瞬間、オーケストレータがルールを識別：
+クライアントが `http://192.168.91.11:26001/boot.ipxe` をフェッチした瞬間、オーケストレータがルールを識別：
 - クライアント IP が指定の `192.168.91.199` に確定；
-- ストレージ先が遠隔ノード `192.168.91.22:26001` に切り替え；
-- メニュー選択をスキップし、OS のブロック読み込みを開始：
+- `set menu-default <target_key>` により該当イメージを事前選択し、10 秒のカウントダウンを開始；
+- **無人自動起動**：キーボード入力がない場合、カウントダウン (10) ... (1) の終了とともに自動的に SANBOOT へ遷移します。
 
 <p align="center">
-  <img src="screenshots/ipxe_client_dispatch_stage2.png" width="80%" alt="iPXE クライアント フェーズ 2">
+  <img src="screenshots/vm_ipxe_countdown_live.png" width="80%" alt="iPXE クライアント カウントダウン自動起動">
   <br>
-  <em>図 4：予約ルールに合致し、手動操作なしで 192.168.91.22 のストレージノードへ自動接続・起動</em>
+  <em>図 4：予約イメージ win8_golden.img が強調表示され、画面上でリアルタイムにカウントダウンを実行</em>
+</p>
+
+### 6.3 フェーズ 3：キーボード介入によるカウントダウン中断と手動選択自由の確保 (Manual Override Freedom)
+
+保守や運用現場において、救助用 WinPE や他 OS へ一時的に切り替えたいケースは頻繁に発生します。`iventoymersed` は固定 `goto` 構文の弊害を完全排除しています：
+- カウントダウン中に **方向キー（上・下）** を押下すると、iPXE のタイマーが直ちに完全停止；
+- カウントダウン秒数表示が消去され、メニューが手動選択モードとして常駐保持；
+- ユーザーは任意の別イメージ（HTTP Range SANBOOT や Linux 等）を自由にカーソル選択し、Enter キーで起動可能です。
+
+<p align="center">
+  <img src="screenshots/vm_boot_manual_override.png" width="80%" alt="iPXE 方向キー入力によるカウントダウン中断">
+  <br>
+  <em>図 5：方向キー入力によりカウントダウンが即時中止され、カーソルが第 2 パスへ移動。100% の手動選択自由度を担保</em>
+</p>
+
+<p align="center">
+  <img src="screenshots/vm_boot_manual_selected.png" width="80%" alt="iPXE 手動選択されたターゲットの起動">
+  <br>
+  <em>図 6：手動選択した起動パスが即座に SAN デバイスとして登録され、ブートシーケンスへ移行</em>
 </p>
 
 ---
